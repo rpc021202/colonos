@@ -173,7 +173,7 @@ function tokenTex(n) {
     for (let i = 0; i < d; i++) { g.beginPath(); g.arc(w / 2 + (i - (d - 1) / 2) * 22, h / 2 + 62, 8, 0, Math.PI * 2); g.fill(); }
   }));
 }
-const cloudTex = canvasTex(128, 128, (g, w, h) => {
+const _unusedCloudTex = canvasTex(128, 128, (g, w, h) => {
   const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
   gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = gr; g.fillRect(0, 0, w, h);
@@ -294,7 +294,7 @@ export class Board3D {
       for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); p.setZ(i, Math.sin(x * 0.9 + time * 1.1) * 0.035 + Math.cos(y * 1.1 + time * 0.8) * 0.035); }
       p.needsUpdate = true; this.ocean.geometry.computeVertexNormals();
     }
-    if (this.fog) this.fog.forEach((s) => { s.material.rotation += s.userData.spin * dt; s.position.x = s.userData.bx + Math.sin(time * 0.3 + s.userData.ph) * 0.12; s.position.z = s.userData.bz + Math.cos(time * 0.25 + s.userData.ph) * 0.1; });
+    if (this.fog) this.fog.forEach((s) => { if (s.userData.leaving) return; s.position.y = s.userData.by + Math.sin(time * 0.6 + s.userData.ph) * 0.03; s.position.x = s.userData.bx + Math.sin(time * 0.25 + s.userData.ph) * 0.04; });
     if (this.robber) this.robber.rotation.y = Math.sin(time * 0.8) * 0.4;
     if (this.tokens && this.tokens.length) { const az = Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z); this.tokens.forEach((t) => (t.rotation.y = az)); }
     this.controls.update();
@@ -403,21 +403,23 @@ export class Board3D {
   }
   seatView(p, np) { if (!this.followTurn || performance.now() - this.userMoved < 8000) return; this.setView((p / np) * Math.PI * 2); }
   buildFog(revealed) {
+    // nubes 3D de algodón sobre cada casilla oculta (no tapan las casillas vecinas)
     this.fog = [];
-    const mat0 = new THREE.SpriteMaterial({ map: cloudTex, color: '#d3dce3', transparent: true, depthWrite: false, opacity: 0.85 });
+    const geo = new THREE.IcosahedronGeometry(1, 2);
     this.tiles.forEach((t) => {
       if (revealed[t.h.id]) return;
       t.hidden = true; t.feat.visible = false; if (t.token) t.token.visible = false;
       t.base.visible = false;
       t.clouds = [];
-      for (let i = 0; i < 6; i++) {
-        const s = new THREE.Sprite(mat0.clone());
-        const a = (i / 6) * Math.PI * 2 + rand(-0.3, 0.3), r = i === 0 ? 0 : rand(0.25, 0.45);
-        const bx = t.h.x + Math.cos(a) * r, bz = t.h.y + Math.sin(a) * r, sc = rand(1.0, 1.45);
-        s.position.set(bx, rand(0.08, 0.38), bz); s.scale.set(sc, sc, 1);
-        s.material.rotation = Math.random() * 6; s.material.opacity = rand(0.75, 0.95);
-        s.userData = { bx, bz, ph: Math.random() * 6, spin: rand(-0.08, 0.08) };
-        this.root.add(s); this.fog.push(s); t.clouds.push(s);
+      const n = 7;
+      for (let i = 0; i < n; i++) {
+        const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: i % 3 ? '#eef2f5' : '#dde4ea', roughness: 1, transparent: true, opacity: 0.96 }));
+        const a = (i / (n - 1)) * Math.PI * 2 + rand(-0.3, 0.3), r = i === 0 ? 0 : rand(0.38, 0.62);
+        const bx = t.h.x + Math.cos(a) * r, bz = t.h.y + Math.sin(a) * r, sc = i === 0 ? rand(0.5, 0.58) : rand(0.3, 0.44);
+        m.position.set(bx, i === 0 ? 0.32 : rand(0.12, 0.3), bz); m.scale.set(sc, sc * 0.72, sc);
+        m.castShadow = true;
+        m.userData = { bx, bz, by: m.position.y, ph: Math.random() * 6, spin: 0 };
+        this.root.add(m); this.fog.push(m); t.clouds.push(m);
       }
     });
     this.updatePortsVisibility();
@@ -431,7 +433,12 @@ export class Board3D {
       t.g.scale.set(1, 0.01, 1);
       this.tween(0.8, (k) => { const e = 1 - Math.pow(1 - k, 3); t.g.scale.set(1, Math.max(0.01, e), 1); });
       const cl = t.clouds || [];
-      cl.forEach((s) => { const o0 = s.material.opacity, y0 = s.position.y; this.tween(1.6, (k) => { s.material.opacity = o0 * (1 - k); s.position.y = y0 + k * 1.2; s.scale.multiplyScalar(1 + 0.01); }, () => { this.root.remove(s); this.fog = this.fog.filter((x) => x !== s); }); });
+      cl.forEach((s) => {
+        s.userData.leaving = true;
+        const o0 = s.material.opacity, p0 = s.position.clone(), sc0 = s.scale.clone();
+        const dir = new THREE.Vector3(s.position.x - t.h.x, 0, s.position.z - t.h.y).normalize();
+        this.tween(1.5, (k) => { const e = 1 - Math.pow(1 - k, 2); s.material.opacity = o0 * (1 - e); s.position.copy(p0).addScaledVector(dir, e * 0.6); s.position.y = p0.y + e * 0.9; s.scale.copy(sc0).multiplyScalar(1 + e * 0.8); }, () => { this.root.remove(s); this.fog = this.fog.filter((x) => x !== s); });
+      });
       t.clouds = [];
     });
     this.updatePortsVisibility();
