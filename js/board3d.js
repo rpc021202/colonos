@@ -461,14 +461,35 @@ function roadMesh(color, len) {
   return merged(L, pieceMat());
 }
 function robberMesh() {
-  const pts = [[0, 0], [0.12, 0], [0.12, 0.025], [0.085, 0.045], [0.105, 0.18], [0.08, 0.27], [0.05, 0.3], [0, 0.31]].map(([x, y]) => new THREE.Vector2(x, y));
-  const L = [paint(new THREE.LatheGeometry(pts, 14), '#3a3633'), paint(G_SPH, '#3a3633', M(0, 0.36, 0, 0.075, 0.08, 0.075)), paint(G_CONE6, '#2a2624', M(0, 0.42, -0.01, 0.085, 0.14, 0.085, 0, -0.2)), paint(G_BOX, '#5b4630', M(0.07, 0.2, 0.05, 0.12, 0.012, 0.02, 0.6, 0, 0.9))];
-  const g = merged(L, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.1 }));
-  const eyeM = new THREE.MeshBasicMaterial({ color: '#ff4a3a' });
-  [-0.025, 0.025].forEach((x) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), eyeM); e.position.set(x, 0.37, 0.068); g.add(e); });
+  const g = new THREE.Group();
+  // capa larga con pliegues (perfil de torno + ondulación)
+  const prof = [[0, 0], [0.13, 0], [0.135, 0.02], [0.115, 0.08], [0.1, 0.17], [0.085, 0.24], [0.07, 0.28], [0.05, 0.3], [0, 0.31]].map(([x, y]) => new THREE.Vector2(x, y));
+  const cloak = new THREE.LatheGeometry(prof, 36);
+  const p = cloak.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x), r = Math.hypot(x, z); const f = 1 + Math.sin(a * 9) * 0.06 * (1 - y / 0.31); p.setXYZ(i, Math.cos(a) * r * f, y, Math.sin(a) * r * f); }
+  cloak.computeVertexNormals();
+  const cloakMat = new THREE.MeshStandardMaterial({ color: '#2c2a2e', roughness: 0.9 });
+  g.add(new THREE.Mesh(cloak, cloakMat));
+  // capucha
+  const hood = new THREE.SphereGeometry(0.085, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62); hood.scale(1, 1.15, 1.05);
+  const hm = new THREE.Mesh(hood, cloakMat); hm.position.set(0, 0.36, -0.005); hm.rotation.x = -0.25; g.add(hm);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.09, 16), cloakMat); tip.position.set(0, 0.45, -0.04); tip.rotation.x = -0.6; g.add(tip);
+  // cara en sombra y ojos que brillan
+  const face = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshStandardMaterial({ color: '#0b0a0c', roughness: 1 })); face.position.set(0, 0.35, 0.02); g.add(face);
+  const eyeM = new THREE.MeshBasicMaterial({ color: '#ff5a3a' });
+  [-0.022, 0.022].forEach((x) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), eyeM); e.position.set(x, 0.36, 0.072); g.add(e); });
+  // cinturón y saco del botín al hombro
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.098, 0.009, 8, 32), new THREE.MeshStandardMaterial({ color: '#5b4128', roughness: 0.7 })); belt.rotation.x = Math.PI / 2; belt.position.y = 0.17; g.add(belt);
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.022, 0.008), new THREE.MeshStandardMaterial({ color: '#c9a44a', metalness: 0.8, roughness: 0.3 })); buckle.position.set(0, 0.17, 0.1); g.add(buckle);
+  const sackGeo = new THREE.SphereGeometry(0.07, 20, 14); sackGeo.scale(1, 1.1, 0.9);
+  const sackMat = new THREE.MeshStandardMaterial({ color: '#a8875a', roughness: 0.95 });
+  const sack = new THREE.Mesh(sackGeo, sackMat); sack.position.set(0.09, 0.3, -0.07); g.add(sack);
+  const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.025, 0.04, 10), sackMat); knot.position.set(0.075, 0.385, -0.06); knot.rotation.z = 0.4; g.add(knot);
+  const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.004, 16), new THREE.MeshStandardMaterial({ color: '#e0b94a', metalness: 0.9, roughness: 0.25 }));
+  coin.position.set(0.06, 0.41, -0.05); coin.rotation.set(0.6, 0, 0.9); g.add(coin);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
-
 /* ---------- clase principal ---------- */
 export class Board3D {
   constructor(el, opts = {}) {
