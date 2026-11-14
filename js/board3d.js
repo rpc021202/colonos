@@ -151,16 +151,70 @@ function scatter(n, rMin, rMax, minDist, avoid) {
   }
   return pts;
 }
-function pine(L, x, y, z, s) {
-  const g = ['#24502a', '#2e5f2f', '#1f4626', '#356b34'][Math.floor(Math.random() * 4)];
-  L.push(paint(G_CYL6, '#5b3d27', M(x, y + 0.04 * s, z, 0.02 * s, 0.09 * s, 0.02 * s)));
-  [[0.13, 0.16, 0.12], [0.1, 0.24, 0.13], [0.065, 0.32, 0.12]].forEach(([r, yy, hh]) => L.push(jitterColor(paint(G_CONE6, g, M(x, y + yy * s, z, r * s, hh * s * 1.6, r * s, Math.random() * 3, rand(-0.05, 0.05))), 0.08)));
+function pine(L, x, y, z, s) { (L.trees || (L.trees = [])).push({ t: 'p', x, y, z, s }); }
+function broadleaf(L, x, y, z, s) { (L.trees || (L.trees = [])).push({ t: 'b', x, y, z, s }); }
+
+/* ---------- árboles orgánicos (variantes suaves, instanciadas) ---------- */
+function colorize(geo, fn) {
+  const p = geo.attributes.position, arr = new Float32Array(p.count * 3), c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) { fn(p.getX(i), p.getY(i), p.getZ(i), c); arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3)); return geo;
 }
-function broadleaf(L, x, y, z, s) {
-  const g = ['#4f7f30', '#5e8f36', '#46752b'][Math.floor(Math.random() * 3)];
-  L.push(paint(G_CYL6, '#6b4a2b', M(x, y + 0.06 * s, z, 0.022 * s, 0.13 * s, 0.022 * s)));
-  L.push(jitterColor(paint(G_ICO1, g, M(x, y + 0.17 * s, z, 0.1 * s, 0.085 * s, 0.1 * s, Math.random() * 3)), 0.1));
-  L.push(jitterColor(paint(G_ICO1, g, M(x + 0.04 * s, y + 0.22 * s, z - 0.02 * s, 0.07 * s, 0.06 * s, 0.07 * s)), 0.1));
+function wobble(geo, amt, f = 9, seed = 0) {
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = vnoise(x * f + seed, z * f + y * f * 0.7 + seed * 2) - 0.5;
+    const r = Math.hypot(x, z) || 1;
+    p.setXYZ(i, x + (x / r) * n * amt, y + n * amt * 0.4, z + (z / r) * n * amt);
+  }
+  return geo;
+}
+function prep(g) { g.deleteAttribute('uv'); if (g.index) g = g.toNonIndexed(); g.deleteAttribute('normal'); return g; }
+function makePine(seed) {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.012, 0.022, 0.12, 7); trunk.translate(0, 0.06, 0);
+  parts.push(colorize(prep(trunk), (x, y, z, c) => c.set('#4e3422').lerp(C('#6b4a30'), y * 6)));
+  const tiers = 5;
+  for (let i = 0; i < tiers; i++) {
+    const k = i / (tiers - 1), r = 0.13 - k * 0.085, h = 0.13 - k * 0.03, y0 = 0.07 + k * 0.2;
+    const cone = new THREE.ConeGeometry(r, h, 11, 2); cone.translate(0, y0 + h / 2, 0);
+    // falda caída: los bordes bajan un poco
+    const p = cone.attributes.position;
+    for (let j = 0; j < p.count; j++) { const rr = Math.hypot(p.getX(j), p.getZ(j)); if (rr > r * 0.8) p.setY(j, p.getY(j) - 0.015); }
+    wobble(cone, 0.02, 14, seed + i);
+    parts.push(colorize(prep(cone), (x, y, z, c) => { const t = Math.hypot(x, z) / r; c.set('#1d4423').lerp(C('#3f7a3a'), Math.min(1, t * 0.8 + (y - y0) * 1.5)).multiplyScalar(0.9 + k * 0.15); }));
+  }
+  const g = mergeGeometries(parts); g.computeVertexNormals(); return g;
+}
+function makeBroad(seed) {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.014, 0.026, 0.16, 7); trunk.translate(0, 0.08, 0);
+  parts.push(colorize(prep(trunk), (x, y, z, c) => c.set('#5a3d28')));
+  const blobs = [[0, 0.2, 0, 0.1], [0.06, 0.17, 0.02, 0.075], [-0.05, 0.18, -0.03, 0.08], [0.01, 0.26, -0.01, 0.075], [-0.02, 0.16, 0.06, 0.065]];
+  blobs.forEach(([x, y, z, r], i) => {
+    const b = new THREE.IcosahedronGeometry(r, 2); wobble(b, r * 0.45, 22, seed * 3 + i); b.translate(x, y, z);
+    parts.push(colorize(prep(b), (px, py, pz, c) => c.set('#3d6b26').lerp(C('#7aa846'), Math.min(1, Math.max(0, (py - 0.12) * 5 + (vnoise(px * 40, pz * 40) - 0.5) * 0.6)))));
+  });
+  const g = mergeGeometries(parts); g.computeVertexNormals(); return g;
+}
+let TREES = null;
+function treeVariants() { if (!TREES) TREES = { p: [0, 1, 2].map((i) => makePine(i * 7.3)), b: [0, 1, 2].map((i) => makeBroad(i * 5.1)) }; return TREES; }
+const TREE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+function treeMeshes(list) {
+  if (!list || !list.length) return [];
+  const V = treeVariants(), groups = {};
+  list.forEach((t) => { const k = t.t + Math.floor(Math.random() * 3); (groups[k] = groups[k] || []).push(t); });
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
+  return Object.entries(groups).map(([k, arr]) => {
+    const im = new THREE.InstancedMesh(V[k[0]][+k[1]], TREE_MAT, arr.length);
+    arr.forEach((t, i) => {
+      q.setFromEuler(new THREE.Euler(rand(-0.06, 0.06), Math.random() * 6.28, rand(-0.06, 0.06)));
+      m.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s * rand(0.9, 1.15), t.s));
+      im.setMatrixAt(i, m); im.setColorAt(i, c.setHSL(rand(-0.02, 0.03), rand(0, 0.15), rand(0.85, 1.0)).lerp(C('#ffffff'), 0.6));
+    });
+    im.castShadow = true; im.receiveShadow = true; return im;
+  });
 }
 function buildFeatures(res, T) {
   const L = [], hy = (x, z) => T.h(x, z);
@@ -329,40 +383,81 @@ function dieFaceTex(n) {
 
 /* ---------- piezas ---------- */
 function shade(hex, k) { const c = C(hex); c.multiplyScalar(k); return '#' + c.getHexString(); }
-const pieceMat = () => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55, metalness: 0.02 });
+const pieceMat = () => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.02 });
+// tejado a dos aguas hecho de hileras de tejas
+function gableRoof(L, cx, cy, cz, w, d, h, color, rot = 0) {
+  const half = w / 2, slope = Math.hypot(half, h), ang = Math.atan2(h, half), rows = 4;
+  for (const side of [-1, 1]) for (let i = 0; i < rows; i++) {
+    const t = (i + 0.5) / rows, along = slope * t;
+    const x = side * (half - Math.cos(ang) * along), y = Math.sin(ang) * along;
+    const k = 0.78 + (i % 2) * 0.1 + rand(-0.03, 0.03);
+    const m = new THREE.Matrix4().makeRotationY(rot).multiply(M(x * 1.06, y + 0.004 * i, 0, slope / rows * 1.25, 0.011, d * 1.12, 0, 0, -side * ang));
+    m.premultiply(new THREE.Matrix4().makeTranslation(cx, cy, cz));
+    L.push(paint(G_BOX, shade(color, k), m));
+  }
+  const ridge = new THREE.Matrix4().makeRotationY(rot).multiply(M(0, h + 0.006, 0, 0.018, 0.016, d * 1.14));
+  ridge.premultiply(new THREE.Matrix4().makeTranslation(cx, cy, cz)); L.push(paint(G_BOX, shade(color, 0.55), ridge));
+}
+const T_ = (L, geo, color, x, y, z, sx, sy, sz, ry = 0, rot = 0) => { const m = new THREE.Matrix4().makeRotationY(rot).multiply(M(x, y, z, sx, sy, sz, ry)); L.push(paint(geo, color, m)); };
+function house(L, x, z, w, d, hw, color, rot = 0, wall = '#efe4cc') {
+  const R = (geo, col, px, py, pz, sx, sy, sz) => { const m = new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rot)).multiply(M(px, py, pz, sx, sy, sz)); L.push(paint(geo, col, m)); };
+  R(G_BOX, '#8d867a', 0, 0.012, 0, w + 0.02, 0.024, d + 0.02);              // zócalo de piedra
+  R(G_BOX, wall, 0, 0.024 + hw / 2, 0, w, hw, d);                            // muros
+  const beam = '#4a3424';
+  [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([sx, sz]) => R(G_BOX, beam, sx * (w / 2 - 0.006), 0.024 + hw / 2, sz * (d / 2 - 0.006), 0.014, hw, 0.014));
+  R(G_BOX, beam, 0, 0.024 + hw * 0.55, d / 2 + 0.002, w, 0.01, 0.004); R(G_BOX, beam, 0, 0.024 + hw * 0.55, -d / 2 - 0.002, w, 0.01, 0.004);
+  R(prism, wall, 0, 0.024 + hw, 0, w * 0.999, hw * 0.75, d * 0.999);       // hastiales
+  R(G_BOX, '#3b2a1e', w * 0.18, 0.024 + 0.035, d / 2 + 0.003, 0.034, 0.07, 0.006); // puerta
+  R(G_BOX, '#ffd98a', -w * 0.22, 0.024 + hw * 0.55, d / 2 + 0.003, 0.026, 0.026, 0.005); // ventana con luz
+  R(G_BOX, shade(color, 0.7), -w * 0.22 - 0.02, 0.024 + hw * 0.55, d / 2 + 0.004, 0.009, 0.03, 0.004);
+  R(G_BOX, shade(color, 0.7), -w * 0.22 + 0.02, 0.024 + hw * 0.55, d / 2 + 0.004, 0.009, 0.03, 0.004);
+  R(G_BOX, '#ffd98a', w / 2 + 0.003, 0.024 + hw * 0.55, 0, 0.005, 0.026, 0.026);
+  const roofL = [];
+  gableRoof(roofL, 0, 0.024 + hw, 0, w + 0.03, d, hw * 0.75, color);
+  roofL.forEach((g) => { g.applyMatrix4(new THREE.Matrix4().makeRotationY(rot)); g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, 0, z)); L.push(g); });
+  R(G_BOX, '#7b746b', w * 0.25, 0.024 + hw + hw * 0.6, -d * 0.2, 0.026, hw * 0.7, 0.026); // chimenea
+}
 function settlementMesh(color) {
-  const roof = shade(color, 0.6);
-  return merged([
-    paint(G_BOX, '#8a7a66', M(0, 0.012, 0, 0.2, 0.024, 0.18)), // zócalo de piedra
-    paint(G_BOX, color, M(0, 0.08, 0, 0.17, 0.12, 0.15)),
-    paint(prism, roof, M(0, 0.14, 0, 0.21, 0.1, 0.18)),
-    paint(G_BOX, '#6b625a', M(0.05, 0.22, -0.03, 0.03, 0.08, 0.03)),
-    paint(G_BOX, '#3b2a1e', M(0, 0.055, 0.076, 0.042, 0.075, 0.005)),
-    paint(G_BOX, '#ffe9a0', M(-0.05, 0.09, 0.076, 0.03, 0.03, 0.004)),
-    paint(G_BOX, '#ffe9a0', M(0.086, 0.09, 0, 0.004, 0.03, 0.03)),
-  ], pieceMat());
+  const L = [];
+  house(L, 0, 0, 0.17, 0.14, 0.1, color);
+  T_(L, G_BOX, '#8a6239', 0.1, 0.02, 0.06, 0.012, 0.04, 0.012); // poste del huerto
+  T_(L, G_ICO0, '#4f7f30', -0.1, 0.02, 0.06, 0.025, 0.02, 0.025);
+  return merged(L, pieceMat());
 }
 function cityMesh(color) {
-  const roof = shade(color, 0.6);
-  return merged([
-    paint(G_BOX, '#8a7a66', M(0, 0.014, 0, 0.36, 0.028, 0.22)),
-    paint(G_BOX, color, M(-0.05, 0.08, 0.02, 0.26, 0.13, 0.17)),
-    paint(prism, roof, M(-0.08, 0.145, 0.02, 0.2, 0.09, 0.19)),
-    paint(G_BOX, color, M(0.1, 0.16, -0.03, 0.12, 0.3, 0.12)),
-    ...[-1, 1].flatMap((sx) => [-1, 1].map((sz) => paint(G_BOX, color, M(0.1 + sx * 0.045, 0.325, -0.03 + sz * 0.045, 0.03, 0.03, 0.03)))),
-    paint(G_CONE4, roof, M(0.1, 0.39, -0.03, 0.08, 0.12, 0.08, Math.PI / 4)),
-    paint(G_BOX, '#3b2a1e', M(-0.09, 0.055, 0.106, 0.05, 0.085, 0.005)),
-    paint(G_BOX, '#ffe9a0', M(0.1, 0.22, 0.031, 0.03, 0.045, 0.004)),
-    paint(G_BOX, '#ffe9a0', M(0.0, 0.09, 0.106, 0.03, 0.03, 0.004)),
-    paint(G_BOX, '#ffe9a0', M(-0.15, 0.09, 0.106, 0.03, 0.03, 0.004)),
-  ], pieceMat());
+  const L = [], stone = '#b9b1a2', stoneD = '#9a9284';
+  T_(L, G_BOX, '#8d867a', 0, 0.012, 0, 0.4, 0.024, 0.3);
+  // muralla con almenas
+  const W = 0.38, D = 0.28, wh = 0.07;
+  [[0, -D / 2, W, 0.022], [0, D / 2, W, 0.022], [-W / 2, 0, 0.022, D], [W / 2, 0, 0.022, D]].forEach(([x, z, sx, sz], i) => {
+    if (i === 1) { T_(L, G_BOX, stone, -W / 4 - 0.02, 0.024 + wh / 2, z, W / 2 - 0.04, wh, sz); T_(L, G_BOX, stone, W / 4 + 0.02, 0.024 + wh / 2, z, W / 2 - 0.04, wh, sz); T_(L, G_BOX, '#4a3424', 0, 0.024 + 0.03, z + 0.008, 0.05, 0.06, 0.01); }
+    else T_(L, G_BOX, stone, x, 0.024 + wh / 2, z, sx, wh, sz);
+    const n = Math.round(Math.max(sx, sz) / 0.04);
+    for (let k = 0; k < n; k++) { const t = -0.5 + (k + 0.5) / n; if (k % 2) continue; T_(L, G_BOX, stoneD, x + (sx > sz ? t * sx : 0), 0.024 + wh + 0.01, z + (sz > sx ? t * sz : 0), sx > sz ? 0.02 : 0.026, 0.02, sz > sx ? 0.02 : 0.026); }
+  });
+  // torres de esquina
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
+    T_(L, G_CYL8, stone, sx * W / 2, 0.024 + 0.05, sz * D / 2, 0.03, 0.1, 0.03);
+    T_(L, G_CONE6, shade(color, 0.85), sx * W / 2, 0.024 + 0.13, sz * D / 2, 0.036, 0.06, 0.036);
+  });
+  // torre del homenaje con bandera
+  T_(L, G_CYL8, stone, 0.07, 0.024 + 0.13, -0.04, 0.05, 0.26, 0.05);
+  for (let k = 0; k < 8; k += 2) { const a = (k / 8) * Math.PI * 2; T_(L, G_BOX, stoneD, 0.07 + Math.cos(a) * 0.045, 0.024 + 0.27, -0.04 + Math.sin(a) * 0.045, 0.018, 0.02, 0.018, -a); }
+  T_(L, G_CONE6, color, 0.07, 0.024 + 0.32, -0.04, 0.06, 0.09, 0.06);
+  T_(L, G_BOX, '#5a4634', 0.07, 0.024 + 0.41, -0.04, 0.005, 0.1, 0.005);
+  T_(L, G_BOX, color, 0.07 + 0.03, 0.024 + 0.44, -0.04, 0.055, 0.032, 0.004);
+  T_(L, G_BOX, '#ffd98a', 0.07, 0.024 + 0.18, -0.04 + 0.051, 0.018, 0.03, 0.004);
+  // casas dentro de la muralla
+  house(L, -0.08, 0.0, 0.13, 0.11, 0.08, color, 0);
+  return merged(L, pieceMat());
 }
 function roadMesh(color, len) {
-  const L = [], n = 7, step = len / n;
-  for (let i = 0; i < n; i++) L.push(jitterColor(paint(G_BOX, color, M(-len / 2 + step * (i + 0.5), 0.034, 0, step * 0.84, 0.026, 0.12, rand(-0.04, 0.04), 0, rand(-0.03, 0.03))), 0.12));
-  L.push(paint(G_BOX, '#4e3726', M(0, 0.014, -0.05, len, 0.022, 0.018)));
-  L.push(paint(G_BOX, '#4e3726', M(0, 0.014, 0.05, len, 0.022, 0.018)));
-  L.push(paint(G_BOX, '#4e3726', M(-len / 2, 0.035, -0.06, 0.02, 0.07, 0.02)), paint(G_BOX, '#4e3726', M(len / 2, 0.035, 0.06, 0.02, 0.07, 0.02)));
+  const L = [], n = 8, step = len / n;
+  for (let i = 0; i < n; i++) L.push(jitterColor(paint(G_BOX, color, M(-len / 2 + step * (i + 0.5), 0.032, 0, step * 0.82, 0.022, 0.11, rand(-0.05, 0.05), 0, rand(-0.03, 0.03))), 0.14));
+  L.push(paint(G_BOX, '#4e3726', M(0, 0.014, -0.048, len, 0.02, 0.016)));
+  L.push(paint(G_BOX, '#4e3726', M(0, 0.014, 0.048, len, 0.02, 0.016)));
+  for (let i = 0; i < 5; i++) L.push(jitterColor(paint(G_DOD, '#8d877d', M(rand(-len / 2, len / 2), 0.008, (Math.random() < 0.5 ? -1 : 1) * rand(0.065, 0.085), 0.012, 0.01, 0.012, Math.random() * 3)), 0.15));
+  [-1, 1].forEach((sd) => { L.push(paint(G_BOX, '#4e3726', M(sd * len / 2, 0.045, sd * 0.062, 0.016, 0.09, 0.016))); L.push(paint(G_BOX, '#ffd98a', M(sd * len / 2, 0.095, sd * 0.062, 0.018, 0.02, 0.018))); });
   return merged(L, pieceMat());
 }
 function robberMesh() {
@@ -482,7 +577,8 @@ export class Board3D {
       const side = merged([paint(G_SIDE, sideCol[h.res], M(0, (TOP - 0.36) / 2, 0, 1, TOP + 0.36, 1))], sideMat);
       const top = new THREE.Mesh(hexTopGeo(h.res === 'ore' ? 16 : 10, T), topMat); top.receiveShadow = true; top.castShadow = true;
       land.add(side, top); g.add(land);
-      const feat = new THREE.Group(); feat.add(merged(buildFeatures(h.res, T), featMat));
+      const FL = buildFeatures(h.res, T);
+      const feat = new THREE.Group(); feat.add(merged(FL, featMat)); treeMeshes(FL.trees).forEach((im) => feat.add(im));
       vegetation(h.res, T, this.hq).forEach((im) => feat.add(im));
       g.add(feat);
       let token = null;
@@ -723,3 +819,4 @@ export class Board3D {
     });
   }
 }
+export { settlementMesh, cityMesh, roadMesh, robberMesh };
