@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Colonos · pantalla de juego</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="css/app.css">
+<style>
+body{overflow:hidden}
+#scene{position:fixed;inset:0}
+#scene canvas{display:block}
+.layer{position:fixed;inset:0;pointer-events:none;z-index:5}
+.layer>*{pointer-events:auto}
+/* inicio y configurador */
+#start,#config{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:10;background:linear-gradient(90deg,rgba(11,34,51,.55),rgba(11,34,51,.1))}
+#start .card{padding:34px;max-width:520px;width:100%;text-align:center}
+#start h1,#config h1{margin:0;font-size:46px;letter-spacing:.01em}
+.sub{color:var(--muted);margin:4px 0 22px}
+.big{width:100%;font-size:20px;padding:16px;margin-top:10px}
+#config{justify-content:flex-start}
+#config .card{padding:26px 28px;max-width:540px;width:100%;max-height:calc(100vh - 48px);overflow:auto}
+.sizes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.sizes button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;padding:12px 14px}
+.sizes b{font-size:17px}
+.sizes span{font-size:12.5px;font-weight:500;opacity:.85}
+.sizes .n{font-size:24px;font-weight:700}
+/* sala */
+#lobby{position:fixed;left:24px;top:24px;bottom:24px;width:min(460px,calc(100vw - 48px));padding:26px 28px;z-index:10;display:flex;flex-direction:column;overflow:auto}
+#lobby h2{margin:0 0 2px;font-size:30px}
+.qrbox{display:flex;gap:18px;align-items:center;margin:16px 0 8px}
+.qr{background:#fff;padding:10px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.12);flex:none}
+.qr svg,.qr img{display:block;width:200px;height:200px}
+.code{font-size:56px;font-weight:700;letter-spacing:.12em;line-height:1}
+.url{font-size:13px;color:var(--muted);word-break:break-all;margin-top:6px}
+.plist{display:flex;flex-direction:column;gap:6px;margin:10px 0;flex:1;min-height:60px}
+.prow{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-weight:600;animation:in .35s cubic-bezier(.2,1.5,.4,1)}
+@keyframes in{from{transform:scale(.85);opacity:0}}
+.prow .chip{width:20px;height:20px}
+.prow small{margin-left:auto;color:var(--muted);font-weight:500}
+.empty{color:var(--muted);font-size:15px;padding:12px 0}
+/* HUD de partida */
+#hud{transition:opacity .3s}
+#hud.off{opacity:0;pointer-events:none}
+#turn{position:fixed;left:20px;top:18px;background:rgba(251,246,234,.94);border-radius:18px;padding:12px 18px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:46vw}
+#turn .chip{width:22px;height:22px}
+#turn .who{font-size:24px;font-weight:700;line-height:1.1}
+#turn .what{font-size:14px;color:var(--muted)}
+#room{position:fixed;right:20px;top:18px;background:rgba(251,246,234,.94);border-radius:16px;padding:8px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-weight:600}
+#room .qr{padding:4px;border-radius:8px;box-shadow:none}
+#room .qr svg,#room .qr img{width:64px;height:64px}
+#room b{font-size:22px;letter-spacing:.1em}
+#strip{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:8px;max-width:calc(100vw - 40px);flex-wrap:wrap;justify-content:center}
+.pc{background:rgba(251,246,234,.92);border-radius:14px;padding:7px 12px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,.22);border:3px solid transparent;font-size:14px;transition:transform .25s,border-color .25s}
+.pc.cur{border-color:var(--accent);transform:translateY(-4px)}
+.pc.off{opacity:.55}
+.pc .nm{font-weight:700;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pc .vp{font-weight:700;font-size:18px;background:#2b2118;color:#fff;border-radius:8px;padding:0 7px}
+.pc .st{color:var(--muted);font-size:12.5px;white-space:nowrap}
+#banner{z-index:15;position:fixed;left:50%;top:22%;transform:translate(-50%,-10px) scale(.95);background:rgba(43,33,24,.9);color:#fff;font-size:30px;font-weight:700;padding:14px 28px;border-radius:20px;opacity:0;transition:all .35s cubic-bezier(.2,1.4,.4,1);pointer-events:none;text-align:center;max-width:80vw}
+#banner.show{opacity:1;transform:translate(-50%,0) scale(1)}
+#keys{position:fixed;left:20px;bottom:18px;color:rgba(255,255,255,.75);font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+#win{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,25,35,.45);z-index:20}
+#win .card{padding:30px 34px;min-width:360px;text-align:center}
+#win h2{font-size:40px;margin:0 0 12px}
+.score{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px dashed var(--line);font-size:18px;font-weight:600}
+.score span:last-child{margin-left:auto;font-size:22px}
+.err{color:#b3261e;font-weight:600;margin-top:10px}
+</style>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
+<script src="vendor/peerjs.min.js"></script>
+<script src="vendor/qrcode.js"></script>
+</head>
+<body>
+<div id="scene"></div>
+<div id="ui"></div>
+<div id="banner"></div>
+<div class="toast" id="toast"></div>
+<script type="module" src="js/host.js"></script>
+</body>
+</html>

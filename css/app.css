@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap');
+:root{
+  --paper:#fbf6ea;--card:#fffdf7;--ink:#2b2118;--muted:#7a6a58;--line:#e6dbc4;--accent:#c1592b;--accent2:#e0874f;
+  --sea:#123a55;--ok:#2f8f4e;--radius:18px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;font-family:'Fredoka',system-ui,sans-serif;color:var(--ink);background:var(--sea)}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:10px 14px;background:#efe4cc;color:var(--ink);font-weight:600;transition:transform .1s,filter .15s,background .15s;touch-action:manipulation}
+button:hover:not(:disabled){filter:brightness(1.04)}
+button:active:not(:disabled){transform:scale(.96)}
+button:disabled{opacity:.38;cursor:default}
+button.primary{background:var(--accent);color:#fff}
+button.ghost{background:transparent;border:2px solid var(--line)}
+button.on,button.sel{background:var(--accent);color:#fff}
+input{font:inherit;padding:11px 14px;border-radius:12px;border:2px solid var(--line);background:#fff;color:var(--ink);min-width:0}
+input:focus{outline:none;border-color:var(--accent2)}
+.chip{width:16px;height:16px;border-radius:50%;border:2px solid rgba(0,0,0,.25);flex:none;display:inline-block;vertical-align:middle}
+.card{background:var(--paper);border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.lbl{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:16px 0 7px;font-weight:600}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1;min-width:48px}
+.note{font-size:13px;color:var(--muted);margin-top:6px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#2b2118;color:#fff;padding:11px 20px;border-radius:999px;font-weight:600;z-index:60;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:92%;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.rc{border-radius:14px;padding:8px 2px 6px;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.35);box-shadow:inset 0 -4px 0 rgba(0,0,0,.15)}
+.rc .e{font-size:26px;display:block;line-height:1.2}
+.rc .n{font-size:22px}
+.rc .t{display:block;font-size:11px;font-weight:500;opacity:.9;text-transform:uppercase;letter-spacing:.04em}
+.rc.zero{opacity:.4}
