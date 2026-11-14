@@ -1,7 +1,7 @@
 // Mando del jugador (móvil): mano, construir, mapa con zoom, comercio.
 import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, anyRoadSpot, anySettSpot, anyCitySpot, canPlayDev, rate, actor, vp, isRevealed } from './engine.js';
 import { joinRoom } from './net.js';
-import { mapSVG, mapBounds } from './map2d.js';
+import { Board3D } from './board3d.js';
 
 const $ = (s) => document.querySelector(s);
 const qs = new URLSearchParams(location.search);
@@ -43,17 +43,17 @@ function connect() {
 function onMsg(m) {
   switch (m.t) {
     case 'lobby': U.lobby = m; U.me = m.you; if (U.screen !== 'game') U.screen = 'lobby'; U.msg = ''; render(); break;
-    case 'start': U.B = m.b; U.me = m.you; U.screen = 'game'; U.vb = null; U.mode = null; U.sel = null; U.tab = 'hand'; render(); break;
+    case 'start': U.B = m.b; U.me = m.you; U.screen = 'game'; U.mode = null; U.sel = null; U.tab = 'hand'; U.needBoard = true; render(); break;
     case 'state': {
       U.S = m.s; U.G = mirror(U.B, m.s);
       if (U.sel && !stillTarget()) U.sel = null;
-      autoTab(); render(); break;
+      sync3D(); autoTab(); render(); break;
     }
     case 'note': toast(m.m); break;
     case 'err': toast('⚠️ ' + m.m); break;
     case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
     case 'full': U.screen = 'join'; U.msg = m.m; net && net.close(); net = null; render(); break;
-    case 'reset': U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; render(); break;
+    case 'reset': U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; U.needBoard = true; render(); break;
   }
 }
 function stillTarget() { const T = curTargets(); return U.sel && (T[U.sel.k] || []).includes(U.sel.id); }
@@ -67,6 +67,29 @@ function autoTab() {
   if (U.mode && !(['main', 'sbp'].includes(G.phase) && actor(G) === U.me)) U.mode = null;
 }
 
+/* ---------- mapa 3D persistente ---------- */
+const mapHost = document.createElement('div');
+mapHost.style.cssText = 'position:absolute;inset:0';
+let b3 = null, prevRev = {};
+function ensure3D() {
+  if (!b3) {
+    b3 = new Board3D(mapHost, { mobile: true });
+    b3.onPick = (sel) => { U.sel = sel; render(); };
+  }
+  if (U.needBoard && U.S) {
+    U.needBoard = false; b3.ready = false;
+    b3.setBoard(U.B, { fog: U.S.opts.fog, revealed: U.S.revealed, robber: U.S.robber });
+    b3.syncPieces(U.S, U.S.players.map((p) => p.color));
+    prevRev = { ...U.S.revealed }; b3.ready = true;
+  }
+}
+function sync3D() {
+  if (!b3 || U.needBoard || !U.S) return;
+  const nw = Object.keys(U.S.revealed || {}).filter((k) => !prevRev[k]).map(Number);
+  if (nw.length) { b3.revealHexes(nw); prevRev = { ...U.S.revealed }; }
+  b3.syncPieces(U.S, U.S.players.map((p) => p.color));
+}
+
 /* ---------- render ---------- */
 function render() {
   const app = $('#app');
@@ -76,7 +99,12 @@ function render() {
   else if (U.screen === 'game' && U.G) app.innerHTML = gameHTML();
   else app.innerHTML = '<div class="wait">Cargando partida<span class="dots"></span></div>';
   const b = $('.body'); if (b && U.tab !== 'map') b.scrollTop = keepScroll;
-  if (U.screen === 'game' && U.tab === 'map') bindMap();
+  if (U.screen === 'game' && U.tab === 'map' && U.S) {
+    ensure3D();
+    $('#mapslot').appendChild(mapHost);
+    b3.setActive(true); b3.resize();
+    b3.setTargets(curTargets(), U.sel, U.G.players[U.me].color);
+  } else if (b3) b3.setActive(false);
   $('#modal').innerHTML = modalHTML();
   if (U.status !== 'open' && U.screen !== 'join') document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando con la pantalla<span class="dots"></span></div>`);
   else $('#lost') && $('#lost').remove();
@@ -161,12 +189,11 @@ function handTab() {
 }
 function mapTab() {
   const G = U.G, T = curTargets();
-  if (!U.vb) U.vb = mapBounds(U.B);
   let hint = '';
   if (U.mode) hint = U.mode === 'road' ? 'Toca dónde va el camino' : U.mode === 'settlement' ? 'Toca dónde va el poblado' : 'Toca el poblado que quieres mejorar';
   else if (T.v.length || T.e.length || T.h.length) hint = phaseLine(G);
   if ((U.mode || G.phase === 'setup' || G.phase === 'roadbuild') && !T.v.length && !T.e.length && !T.h.length && actor(G) === U.me) hint = 'No hay sitio disponible';
-  return `<div id="mapwrap">${mapSVG(G, T, U.sel, U.vb)}</div>${hint ? `<div class="maphint">${hint}</div>` : ''}
+  return `<div id="mapslot"></div>${hint ? `<div class="maphint">${hint}</div>` : ''}
     <div class="zoom"><button data-a="zin">+</button><button data-a="zout">−</button><button data-a="zfit">⤢</button></div>`;
 }
 function counter(obj, key, max) {
@@ -233,45 +260,6 @@ function modalHTML() {
   return '';
 }
 
-/* ---------- mapa: arrastrar, pellizcar, tocar ---------- */
-function bindMap() {
-  const wrap = $('#mapwrap'), svg = $('#map'); if (!wrap || !svg) return;
-  const pts = new Map(); let start = null, moved = false, pinch0 = null;
-  const unitsPerPx = () => { const r = svg.getBoundingClientRect(); return Math.max(U.vb.w / r.width, U.vb.h / r.height); };
-  const apply = () => svg.setAttribute('viewBox', `${U.vb.x} ${U.vb.y} ${U.vb.w} ${U.vb.h}`);
-  wrap.addEventListener('pointerdown', (e) => { wrap.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 1) { start = { x: e.clientX, y: e.clientY, t: Date.now() }; moved = false; } if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y), vb: { ...U.vb } }; moved = true; } });
-  wrap.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId)) return;
-    const prev = pts.get(e.pointerId), cur = { x: e.clientX, y: e.clientY }; pts.set(e.pointerId, cur);
-    if (pts.size === 1) {
-      if (start && Math.hypot(cur.x - start.x, cur.y - start.y) > 8) moved = true;
-      if (moved) { const k = unitsPerPx(); U.vb.x -= (cur.x - prev.x) * k; U.vb.y -= (cur.y - prev.y) * k; apply(); }
-    } else if (pts.size === 2 && pinch0) {
-      const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), f = pinch0.d / Math.max(20, d);
-      zoomTo(pinch0.vb, f, (a.x + b.x) / 2, (a.y + b.y) / 2, svg); apply();
-    }
-  });
-  const up = (e) => {
-    pts.delete(e.pointerId); if (pts.size < 2) pinch0 = null;
-    if (pts.size === 0 && start && !moved && Date.now() - start.t < 600) {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const t = el && el.closest('[data-v],[data-e],[data-h]');
-      if (t) { const k = t.dataset.v !== undefined ? 'v' : t.dataset.e !== undefined ? 'e' : 'h'; U.sel = { k, id: +t.dataset[k] }; render(); }
-    }
-    if (pts.size === 0) start = null;
-  };
-  wrap.addEventListener('pointerup', up); wrap.addEventListener('pointercancel', up);
-  wrap.addEventListener('wheel', (e) => { e.preventDefault(); zoomTo({ ...U.vb }, e.deltaY > 0 ? 1.12 : 0.89, e.clientX, e.clientY, svg); apply(); }, { passive: false });
-}
-function zoomTo(base, f, cx, cy, svg) {
-  const full = mapBounds(U.B), r = svg.getBoundingClientRect();
-  const w = Math.min(full.w * 1.4, Math.max(3, base.w * f)), h = (w * base.h) / base.w;
-  const k = Math.max(base.w / r.width, base.h / r.height);
-  const ox = base.x + (cx - r.left - (r.width - base.w / k) / 2) * k, oy = base.y + (cy - r.top - (r.height - base.h / k) / 2) * k;
-  const fx = (ox - base.x) / base.w, fy = (oy - base.y) / base.h;
-  U.vb = { x: ox - fx * w, y: oy - fy * h, w, h };
-}
-
 /* ---------- eventos ---------- */
 document.addEventListener('input', (e) => {
   if (e.target.id === 'name') U.name = e.target.value;
@@ -331,8 +319,9 @@ document.addEventListener('click', (e) => {
     case 'deal': send({ t: 'confirm', q: +d.q }); break;
     case 'canceloffer': send({ t: 'cancelOffer' }); break;
     case 'winok': U.winSeen = true; render(); break;
-    case 'zin': case 'zout': { const svg = $('#map'), r = svg.getBoundingClientRect(); zoomTo({ ...U.vb }, d.a === 'zin' ? 0.75 : 1.33, r.left + r.width / 2, r.top + r.height / 2, svg); render(); break; }
-    case 'zfit': U.vb = null; render(); break;
+    case 'zin': b3 && b3.zoomBy(0.78); break;
+    case 'zout': b3 && b3.zoomBy(1.28); break;
+    case 'zfit': b3 && b3.setView(0, true); break;
   }
 });
 function confirmLeave() { return true; }
