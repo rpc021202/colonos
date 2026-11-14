@@ -4,6 +4,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
+import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
+import { Water } from 'three/addons/objects/Water.js';
 import { RINFO } from './engine.js';
 
 const TOP = 0.16; // altura del borde de las casillas (donde van caminos y poblados)
@@ -101,9 +108,10 @@ function makeTerrain(res, wx, wz) {
       }
       case 'brick': return C('#c4744a').lerp(C('#a85a35'), n).lerp(C('#5b2f1c'), smooth(0, 0.08, -dy + 0.02));
       case 'ore': {
-        const rock = C('#6e747a').lerp(C('#8b9096'), n);
-        if (dy < 0.04) return C('#7b8a68').lerp(rock, smooth(0, 0.04, dy));
-        return rock.lerp(C('#f3f5f7'), smooth(0.36 + n * 0.12, 0.46 + n * 0.12, dy));
+        const strata = 0.5 + 0.5 * Math.sin(dy * 60 + n * 6);
+        const rock = C('#575d63').lerp(C('#7e848a'), n * 0.7 + strata * 0.3);
+        if (dy < 0.05) return C('#6f7f5c').lerp(rock, smooth(0, 0.05, dy));
+        return rock.lerp(C('#f3f5f7'), smooth(0.5 + n * 0.12, 0.6 + n * 0.12, dy));
       }
       case 'desert': return C('#e6d39c').lerp(C('#cdb377'), n);
     }
@@ -126,6 +134,8 @@ function hexTopGeo(n, T) {
   let g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(Cc, 3));
+  const uv = []; for (let i = 0; i < P.length; i += 3) uv.push(P[i] * 1.5, P[i + 2] * 1.5);
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g = mergeVertices(g, 1e-4); g.computeVertexNormals();
   return g;
 }
@@ -177,8 +187,6 @@ function buildFeatures(res, T) {
       const y = hy(p.x, p.z), ry = Math.random() * 3;
       L.push(paint(G_CYL12, '#e9c76a', M(p.x, y + 0.055, p.z, 0.055, 0.1, 0.055, ry, 0, Math.PI / 2)));
     });
-    // haces de trigo en pie
-    scatter(28, 0.34, 0.86, 0.07).forEach((p) => L.push(jitterColor(paint(G_CONE6, '#e3bd4f', M(p.x, hy(p.x, p.z) + 0.03, p.z, 0.022, 0.07, 0.022)), 0.1)));
     // espantapájaros
     const sp = scatter(1, 0.5, 0.7, 0.2)[0];
     if (sp) { const y = hy(sp.x, sp.z); L.push(paint(G_BOX, '#6b4a2b', M(sp.x, y + 0.09, sp.z, 0.014, 0.18, 0.014))); L.push(paint(G_BOX, '#6b4a2b', M(sp.x, y + 0.13, sp.z, 0.12, 0.012, 0.012))); L.push(paint(G_SPH, '#c79a52', M(sp.x, y + 0.19, sp.z, 0.03, 0.03, 0.03))); L.push(paint(G_BOX, '#a33b2b', M(sp.x, y + 0.12, sp.z, 0.05, 0.06, 0.03))); }
@@ -211,6 +219,54 @@ function buildFeatures(res, T) {
     scatter(6, 0.3, 0.85, 0.12).forEach((p) => L.push(jitterColor(paint(G_DOD, '#c9a86a', M(p.x, hy(p.x, p.z) + 0.01, p.z, 0.035, 0.025, 0.035, Math.random() * 3)), 0.12)));
   }
   return L;
+}
+
+/* ---------- vegetación instanciada (hierba, trigo) ---------- */
+const G_BLADE = (() => { const g = new THREE.ConeGeometry(0.011, 0.06, 3); g.translate(0, 0.03, 0); return g; })();
+const G_STALK = (() => { const g = new THREE.CylinderGeometry(0.0025, 0.0035, 0.09, 4); g.translate(0, 0.045, 0); const e = new THREE.CapsuleGeometry(0.0065, 0.03, 2, 6); e.translate(0, 0.105, 0); [g, e].forEach((x) => { x.deleteAttribute('uv'); }); return mergeGeometries([g.toNonIndexed(), e.toNonIndexed()]); })();
+const VEG_MAT = new THREE.MeshStandardMaterial({ roughness: 0.85 });
+function vegetation(res, T, dense) {
+  const out = [], q = new THREE.Quaternion(), m = new THREE.Matrix4(), col = new THREE.Color();
+  const make = (geo, list, colorFn, shadow) => {
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(geo, VEG_MAT, list.length);
+    list.forEach((p, i) => {
+      q.setFromEuler(new THREE.Euler(rand(-0.25, 0.25), Math.random() * 6.28, rand(-0.25, 0.25)));
+      const s = p.s || rand(0.7, 1.3);
+      m.compose(new THREE.Vector3(p.x, T.h(p.x, p.z) - 0.004, p.z), q, new THREE.Vector3(s, s * rand(0.8, 1.4), s));
+      im.setMatrixAt(i, m); im.setColorAt(i, colorFn(p, col));
+    });
+    im.receiveShadow = true; im.castShadow = !!shadow; out.push(im);
+  };
+  const k = dense ? 1 : 0.35;
+  const pts = (n, rMin = 0.3) => { const a = []; for (let i = 0; i < n * k; i++) { const ang = Math.random() * 6.28, r = Math.sqrt(rand(rMin * rMin, 0.81)); const x = Math.cos(ang) * r, z = Math.sin(ang) * r; if (hexD(x, z) < 0.93) a.push({ x, z }); } return a; };
+  if (res === 'sheep') make(G_BLADE, pts(650), (p, c) => c.setHSL(0.24 + rand(-0.03, 0.03), 0.55, 0.3 + rand(0, 0.15)));
+  if (res === 'wood') make(G_BLADE, pts(260), (p, c) => c.setHSL(0.27 + rand(-0.03, 0.03), 0.5, 0.2 + rand(0, 0.1)));
+  if (res === 'ore') make(G_BLADE, pts(120, 0.6).filter((p) => T.h(p.x, p.z) - TOP < 0.06), (p, c) => c.setHSL(0.22, 0.3, 0.3 + rand(0, 0.1)));
+  if (res === 'desert') make(G_BLADE, pts(40, 0.4), (p, c) => c.setHSL(0.15, 0.35, 0.45));
+  if (res === 'wheat') {
+    // espigas plantadas en hileras siguiendo la dirección del campo
+    const list = [], dir = T.rot, cs = Math.cos(dir), sn = Math.sin(dir), step = dense ? 0.035 : 0.06;
+    for (let a = -0.95; a <= 0.95; a += 0.07) for (let b = -0.95; b <= 0.95; b += step) {
+      const x = a * cs - b * sn + rand(-0.008, 0.008), z = a * sn + b * cs + rand(-0.008, 0.008);
+      if (hexD(x, z) > 0.9 || Math.hypot(x, z) < 0.34) continue;
+      list.push({ x, z, s: rand(0.8, 1.15) });
+    }
+    make(G_STALK, list, (p, c) => c.setHSL(0.12 + rand(-0.015, 0.015), 0.6 + rand(0, 0.15), 0.5 + rand(-0.06, 0.06)), dense);
+  }
+  return out;
+}
+function detailNormalTex() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), img = g.createImageData(S, S), h = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) h[y * S + x] = vnoise(x / 8, y / 8) * 0.6 + vnoise(x / 3, y / 3) * 0.4;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = h[y * S + ((x + 1) % S)] - h[y * S + ((x - 1 + S) % S)], dy = h[((y + 1) % S) * S + x] - h[((y - 1 + S) % S) * S + x];
+    const nx = -dx * 3, ny = -dy * 3, l = Math.hypot(nx, ny, 1), i = (y * S + x) * 4;
+    img.data[i] = (nx / l * 0.5 + 0.5) * 255; img.data[i + 1] = (ny / l * 0.5 + 0.5) * 255; img.data[i + 2] = (1 / l * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
 }
 
 /* ---------- texturas ---------- */
@@ -350,6 +406,17 @@ export class Board3D {
     this.root = new THREE.Group(); this.scene.add(this.root);
     this.followTurn = !this.mobile; this.userMoved = 0; this.active = true;
     this.waterTex = waterNormalTex();
+    this.detailTex = detailNormalTex();
+    this.hq = !this.mobile;
+    if (this.hq) {
+      // posproceso: desenfoque de miniatura (tilt-shift) en los bordes de la imagen
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.tsH = new ShaderPass(HorizontalTiltShiftShader); this.tsV = new ShaderPass(VerticalTiltShiftShader);
+      this.tsH.uniforms.r.value = this.tsV.uniforms.r.value = 0.52;
+      this.composer.addPass(this.tsH); this.composer.addPass(this.tsV);
+      this.composer.addPass(new OutputPass());
+    }
     this.resize(); addEventListener('resize', () => this.resize());
     this.renderer.setAnimationLoop(() => this.tick());
     if (this.mobile) this.bindPicking();
@@ -359,19 +426,24 @@ export class Board3D {
     const w = this.el.clientWidth || innerWidth, h = this.el.clientHeight || innerHeight;
     if (!w || !h) return;
     this.renderer.setSize(w, h); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    if (this.composer) {
+      this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.composer.setSize(w, h);
+      const k = 1.6; this.tsH.uniforms.h.value = k / w; this.tsV.uniforms.v.value = k / h;
+    }
   }
   tween(dur, fn, done) { this.anims.push({ t: 0, dur, fn, done }); }
   tick() {
     const dt = Math.min(0.05, this.clock.getDelta()), time = this.clock.elapsedTime;
     this.anims = this.anims.filter((a) => { a.t += dt; const k = Math.min(1, a.t / a.dur); a.fn(k, dt); if (k >= 1) { a.done && a.done(); return false; } return true; });
-    if (this.water) { this.water.material.normalMap.offset.set(time * 0.012, time * 0.008); }
+    if (this.water && this.water.material.normalMap) { this.water.material.normalMap.offset.set(time * 0.012, time * 0.008); }
     if (this.water2) { this.water2.material.normalMap.offset.set(-time * 0.01, time * 0.014); }
     if (this.fog) this.fog.forEach((s) => { if (s.userData.leaving) return; s.position.y = s.userData.by + Math.sin(time * 0.6 + s.userData.ph) * 0.03; s.position.x = s.userData.bx + Math.sin(time * 0.25 + s.userData.ph) * 0.04; });
     if (this.robber) this.robber.rotation.y = Math.sin(time * 0.8) * 0.4;
     if (this.tokens && this.tokens.length) { const az = Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z); this.tokens.forEach((t) => (t.rotation.y = az)); }
     if (this.markers) this.markers.children.forEach((m) => { if (m.userData.pulse) { const s = 1 + Math.sin(time * 5) * 0.18; m.scale.setScalar(s * (m.userData.base || 1)); } });
+    if (this.water && this.water.material.uniforms && this.water.material.uniforms.time) this.water.material.uniforms.time.value += dt * 0.35;
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+    if (this.composer) this.composer.render(dt); else this.renderer.render(this.scene, this.camera);
   }
   clear() {
     this.scene.remove(this.root); this.root = new THREE.Group(); this.scene.add(this.root);
@@ -384,7 +456,10 @@ export class Board3D {
     // agua profunda + capa de reflejos
     const wm = new THREE.MeshStandardMaterial({ color: '#17628c', roughness: 0.28, metalness: 0.0, normalMap: this.waterTex, normalScale: new THREE.Vector2(0.18, 0.18), envMapIntensity: 0.8 });
     wm.normalMap.repeat.set(ex * 1.2, ex * 1.2);
-    this.water = new THREE.Mesh(new THREE.PlaneGeometry(ex * 8, ex * 8), wm);
+    if (this.hq) {
+      this.water = new Water(new THREE.PlaneGeometry(ex * 8, ex * 8), { textureWidth: 1024, textureHeight: 1024, waterNormals: this.waterTex, sunDirection: this.sun.position.clone().normalize(), sunColor: 0xfff0d2, waterColor: 0x0d4f6e, distortionScale: 1.6, fog: true, alpha: 1 });
+      this.water.material.uniforms.size.value = 3.5;
+    } else this.water = new THREE.Mesh(new THREE.PlaneGeometry(ex * 8, ex * 8), wm);
     this.water.rotation.x = -Math.PI / 2; this.water.position.y = -0.1; this.water.receiveShadow = true; this.root.add(this.water);
     // aguas someras turquesa alrededor de la isla
     const sg = [], beach = [];
@@ -397,7 +472,7 @@ export class Board3D {
     const bm = merged(beach, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })); bm.castShadow = false; this.root.add(bm);
     // casillas
     const sideMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
-    const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 });
+    const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, normalMap: this.detailTex, normalScale: new THREE.Vector2(0.7, 0.7) });
     const featMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
     const sideCol = { wood: '#5d4430', sheep: '#5d4430', wheat: '#6e5634', brick: '#6a3a24', ore: '#55595e', desert: '#a8925c' };
     this.tiles = B.hexes.map((h) => {
@@ -407,7 +482,9 @@ export class Board3D {
       const side = merged([paint(G_SIDE, sideCol[h.res], M(0, (TOP - 0.36) / 2, 0, 1, TOP + 0.36, 1))], sideMat);
       const top = new THREE.Mesh(hexTopGeo(h.res === 'ore' ? 16 : 10, T), topMat); top.receiveShadow = true; top.castShadow = true;
       land.add(side, top); g.add(land);
-      const feat = merged(buildFeatures(h.res, T), featMat); g.add(feat);
+      const feat = new THREE.Group(); feat.add(merged(buildFeatures(h.res, T), featMat));
+      vegetation(h.res, T, this.hq).forEach((im) => feat.add(im));
+      g.add(feat);
       let token = null;
       if (h.num) {
         token = new THREE.Group();
