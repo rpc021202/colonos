@@ -2,6 +2,7 @@
 import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total } from './engine.js';
 import { Board3D } from './board3d.js';
 import { hostRoom, makeCode } from './net.js';
+import { botAction } from './bots.js';
 
 const $ = (s) => document.querySelector(s);
 const SAVE = 'colonos-host-v1';
@@ -63,6 +64,7 @@ function render() {
     ui.innerHTML = `<div id="start"><div class="card">
       <h1>⬡ Colonos</h1><div class="sub">Esta pantalla será el tablero. Cada jugador se une con su móvil.</div>
       <button class="primary big" data-a="new">Crear partida</button>
+      <button class="big ghost" data-a="demo">👀 Ver una partida de demostración</button>
       ${canResume ? `<button class="big ghost" data-a="resume">Reanudar sala ${esc(s.code)} · ${s.G.players.length} jugadores</button>` : ''}
       <button class="big ghost" data-a="joinhere">Unirme como jugador desde este dispositivo</button>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
@@ -96,7 +98,8 @@ function render() {
       <div class="qrbox"><div class="qr">${qrSVG(url)}</div><div><div class="note" style="margin:0">Código</div><div class="code">${code}</div><div class="url">${esc(url.replace(/^https?:\/\//, ''))}</div></div></div>
       <div class="seg"><button data-a="copy">📋 Copiar enlace</button>${navigator.share ? '<button data-a="share">📤 Compartir</button>' : ''}</div>
       <label class="lbl">Jugadores (${lobby.length}/8)</label>
-      <div class="plist">${lobby.length ? lobby.map((p, i) => `<div class="prow"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <small>anfitrión</small>' : ''}${p.online ? '' : ' <small>desconectado</small>'}</div>`).join('') : '<div class="empty">Esperando a que se una alguien…</div>'}</div>
+      <div class="plist">${lobby.length ? lobby.map((p, i) => `<div class="prow"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${p.bot ? ` <small>🤖 bot</small><button class="ghost" style="margin-left:6px;padding:2px 9px" data-a="rmbot" data-t="${p.token}">✕</button>` : i === 0 ? ' <small>anfitrión</small>' : ''}${p.online || p.bot ? '' : ' <small>desconectado</small>'}</div>`).join('') : '<div class="empty">Esperando a que se una alguien…</div>'}</div>
+      <button class="ghost" data-a="addbot" ${lobby.length >= 8 ? 'disabled' : ''}>🤖 Añadir un bot</button>
       <div class="note">Mapa: ${hexCountFor(Math.max(2, lobby.length || cfg.players), cfg.density)} hexágonos · ${cfg.fog ? 'a ciegas' : 'visible'} · ${cfg.target} puntos</div>
       <button class="primary big" data-a="go" ${lobby.length >= 2 ? '' : 'disabled'}>Empezar partida${lobby.length ? ` (${lobby.length})` : ''}</button>
       <button class="ghost" data-a="cfgback" style="margin-top:8px">Cambiar ajustes</button>
@@ -123,8 +126,8 @@ function renderHUD() {
   const T = G.players[G.turn], online = new Set([...conns.values()]);
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
-    <div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>
-    <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">🃏${total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
+    <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">🃏${total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · F: pantalla completa</div>
   </div>
   ${G.winner !== null && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
@@ -219,6 +222,31 @@ function afterAct() {
   save();
 }
 
+/* ---------- bots ---------- */
+const BOT_NAMES = ['Ada', 'Bruno', 'Carla', 'Dani', 'Elena', 'Fran', 'Gala', 'Hugo'];
+let demo = false, botWait = 0;
+function addBot() {
+  if (lobby.length >= 8) return;
+  const used = new Set(lobby.map((p) => p.name));
+  const name = (BOT_NAMES.find((n) => !used.has(n + ' 🤖')) || 'Bot') + ' 🤖';
+  lobby.push({ token: 'bot-' + Math.random().toString(36).slice(2, 8), name, color: freeColor(null), bot: true, online: true });
+}
+setInterval(() => {
+  if (!G || screen !== 'game' || G.winner !== null || Date.now() < botWait) return;
+  if (G.offer && !G.offer._ts) G.offer._ts = Date.now();
+  for (let p = 0; p < lobby.length; p++) {
+    if (!lobby[p] || !lobby[p].bot) continue;
+    const a = botAction(G, p);
+    if (!a) continue;
+    let e = act(G, p, a);
+    if (e) { G.ev = []; e = act(G, p, { t: G.phase === 'sbp' ? 'pass' : 'end' }); if (e) { G.ev = []; continue; } }
+    const rolled = G.ev.some((x) => x.t === 'roll'), built = G.ev.some((x) => x.t === 'build');
+    afterAct();
+    botWait = Date.now() + (rolled ? 2600 : built ? 1300 : a.t === 'respond' ? 300 : 800) * (demo ? 1 : 0.8);
+    return;
+  }
+}, 200);
+
 /* ---------- empezar ---------- */
 function startGame() {
   const players = lobby.map((p) => ({ name: p.name, color: p.color }));
@@ -272,10 +300,19 @@ document.addEventListener('click', async (e) => {
     }
     case 'cfgback': screen = 'config'; render(); break;
     case 'go': if (lobby.length >= 2) startGame(); break;
+    case 'addbot': addBot(); broadcastLobby(); save(); break;
+    case 'rmbot': lobby = lobby.filter((p) => p.token !== d.t); broadcastLobby(); save(); break;
+    case 'demo': {
+      demo = true; code = null; lobby = []; cfg = { ...cfg, players: 4, fog: false, target: 10 };
+      for (let i = 0; i < 4; i++) addBot();
+      startGame(); break;
+    }
+    case 'exitdemo': demo = false; G = null; screen = 'start'; previewKey = ''; board.setBoard(genBoard(19), { fog: false }); board.spin(true); render(); break;
     case 'copy': try { await navigator.clipboard.writeText(joinURL()); toast('Enlace copiado'); } catch (ex) { toast(joinURL()); } break;
     case 'share': try { await navigator.share({ title: 'Colonos', text: `¡Únete a mi partida! Código ${code}`, url: joinURL() }); } catch (ex) {} break;
     case 'closewin': G._winClosed = true; renderHUD(); break;
     case 'again': {
+      if (demo) { G = null; lobby = []; for (let i = 0; i < 4; i++) addBot(); startGame(); break; }
       G = null; staticB = null; screen = 'lobby'; previewKey = ''; preview();
       for (const [cid] of conns) send(cid, { t: 'reset' });
       broadcastLobby(); break;
