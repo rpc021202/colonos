@@ -447,9 +447,9 @@ export class Board3D {
     });
     if (opts.fog) this.buildFog(opts.revealed || {});
     const sc = this.sun.shadow.camera; sc.left = -ex; sc.right = ex; sc.top = ex; sc.bottom = -ex; sc.far = 60; sc.updateProjectionMatrix();
-    this.scene.fog.near = ex * 2.6; this.scene.fog.far = ex * 7;
     this.camDist = this.fitDist();
-    this.controls.maxDistance = ex * 4;
+    this.scene.fog.near = this.camDist * 1.4; this.scene.fog.far = this.camDist * 4;
+    this.controls.maxDistance = Math.max(ex * 4, this.camDist * 1.6);
     this.setView(0, false);
   }
   fitDist() {
