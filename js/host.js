@@ -3,6 +3,7 @@ import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIE
 import { Board3D } from './board3d.js';
 import { hostRoom, makeCode } from './net.js';
 import { botAction } from './bots.js';
+import { sound } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
 const SAVE = 'colonos-host-v1';
@@ -128,7 +129,8 @@ function renderHUD() {
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
     <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">🃏${total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
-    <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · F: pantalla completa</div>
+    <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
+    <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
   </div>
   ${G.winner !== null && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
     ${G.players.map((_, i) => i).sort((a, b) => vp(G, b, true) - vp(G, a, true)).map((i) => `<div class="score"><span class="chip" style="background:${G.players[i].color}"></span>${pn(G, i)}<span>${vp(G, i, true)}</span></div>`).join('')}
@@ -208,14 +210,17 @@ function afterAct() {
   const evs = G.ev; G.ev = [];
   let rolled = false;
   evs.forEach((e) => {
-    if (e.t === 'roll') { rolled = true; board.rollDice(e.d[0], e.d[1]); }
-    else if (e.t === 'produce') setTimeout(() => board.produce(e.hexes, e.flows), rolled ? 1700 : 0);
+    if (e.t === 'roll') { rolled = true; board.rollDice(e.d[0], e.d[1]); sound.play('dice'); }
+    else if (e.t === 'produce') setTimeout(() => { board.produce(e.hexes, e.flows); if (e.hexes.length) sound.play('produce'); }, rolled ? 1700 : 0);
+    else if (e.t === 'build') sound.play(e.k === 'r' ? 'road' : e.k === 'c' ? 'city' : 'settlement');
+    else if (e.t === 'robber') sound.play('robber');
+    else if (e.t === 'devbuy') sound.play('devcard');
     else if (e.t === 'reveal') setTimeout(() => board.revealHexes(e.hexes), 650);
-    else if (e.t === 'banner') banner(e.m);
+    else if (e.t === 'banner') { banner(e.m); if (e.m.startsWith('🤝')) sound.play('trade'); }
     else if (e.t === 'gain') sendTo(e.to, { t: 'note', m: e.m });
-    else if (e.t === 'turn') { board.seatView(e.p, G.players.length); sendTo(e.p, { t: 'yourturn' }); }
+    else if (e.t === 'turn') { board.seatView(e.p, G.players.length); sendTo(e.p, { t: 'yourturn' }); if (!e.setup) sound.play('turn'); }
     else if (e.t === 'sbp') sendTo(e.p, { t: 'yourturn', sbp: true });
-    else if (e.t === 'win') setTimeout(() => banner(`🏆 ¡${G.players[e.p].name} gana!`), 300);
+    else if (e.t === 'win') { setTimeout(() => banner(`🏆 ¡${G.players[e.p].name} gana!`), 300); sound.play('win'); }
   });
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   broadcastState();
@@ -280,6 +285,7 @@ async function resume() {
 
 /* ---------- eventos ---------- */
 document.addEventListener('click', async (e) => {
+  sound.unlock();
   const t = e.target.closest('[data-a]'); if (!t) return;
   const d = t.dataset;
   switch (d.a) {
@@ -301,6 +307,8 @@ document.addEventListener('click', async (e) => {
     }
     case 'cfgback': screen = 'config'; render(); break;
     case 'go': if (lobby.length >= 2) startGame(); break;
+    case 'music': sound.setMusic(!sound.musicOn); renderHUD(); break;
+    case 'sfx': sound.setSfx(!sound.sfxOn); renderHUD(); break;
     case 'addbot': addBot(); broadcastLobby(); save(); break;
     case 'rmbot': lobby = lobby.filter((p) => p.token !== d.t); broadcastLobby(); save(); break;
     case 'demo': {
@@ -325,6 +333,8 @@ addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 'h' && screen === 'game') { hudHidden = !hudHidden; renderHUD(); }
   if (k === 'c' && screen === 'game') { board.followTurn = !board.followTurn; board.userMoved = 0; toast(board.followTurn ? 'La cámara sigue el turno' : 'Cámara libre'); if (board.followTurn) board.seatView(G.turn, G.players.length); renderHUD(); }
+  if (k === 'm') { sound.unlock(); sound.setMusic(!sound.musicOn); if (screen === 'game') renderHUD(); }
+  if (k === 's' && screen === 'game') { sound.unlock(); sound.setSfx(!sound.sfxOn); renderHUD(); }
   if (k === 'f') { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }
   if (k === 'r' && screen === 'game') { board.userMoved = 0; board.setView((G.turn / G.players.length) * Math.PI * 2); }
 });

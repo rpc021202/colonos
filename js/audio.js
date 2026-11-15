@@ -1,0 +1,171 @@
+// Sonido generado en el navegador: música medieval y efectos (sin archivos de audio).
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+class Sound {
+  constructor() { this.ctx = null; this.musicOn = store.get('colonos-music', true); this.sfxOn = store.get('colonos-sfx', true); this.pluckCache = {}; }
+  // hay que llamarlo desde un clic (los navegadores no dejan sonar sin interacción)
+  unlock() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain(); this.master.gain.value = 0.9; this.master.connect(this.ctx.destination);
+      // pequeña reverberación de sala de castillo
+      this.verb = this.ctx.createConvolver(); this.verb.buffer = this.impulse(2.2, 2.5);
+      this.verbGain = this.ctx.createGain(); this.verbGain.gain.value = 0.28; this.verb.connect(this.verbGain); this.verbGain.connect(this.master);
+      this.musicBus = this.ctx.createGain(); this.musicBus.gain.value = this.musicOn ? 0.22 : 0; this.musicBus.connect(this.master); this.musicBus.connect(this.verb);
+      this.sfxBus = this.ctx.createGain(); this.sfxBus.gain.value = this.sfxOn ? 0.8 : 0; this.sfxBus.connect(this.master); this.sfxBus.connect(this.verb);
+      this.noiseBuf = this.noise(2);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this.playing) this.startMusic();
+  }
+  impulse(sec, decay) { const r = this.ctx.sampleRate, len = r * sec, b = this.ctx.createBuffer(2, len, r); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); } return b; }
+  noise(sec) { const r = this.ctx.sampleRate, b = this.ctx.createBuffer(1, r * sec, r), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
+  setMusic(on) { this.musicOn = on; store.set('colonos-music', on); if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.3); }
+  setSfx(on) { this.sfxOn = on; store.set('colonos-sfx', on); if (this.sfxBus) this.sfxBus.gain.setTargetAtTime(on ? 0.8 : 0, this.ctx.currentTime, 0.1); }
+
+  /* ---------- instrumentos ---------- */
+  // cuerda pulsada (Karplus-Strong) con cuerpo de laúd
+  pluckBuffer(freq) {
+    const key = Math.round(freq * 10);
+    if (this.pluckCache[key]) return this.pluckCache[key];
+    const r = this.ctx.sampleRate, len = Math.floor(r * 2.2), b = this.ctx.createBuffer(1, len, r), d = b.getChannelData(0);
+    const N = Math.max(2, Math.floor(r / freq)), ring = new Float32Array(N);
+    for (let i = 0; i < N; i++) ring[i] = Math.random() * 2 - 1;
+    let idx = 0, prev = 0;
+    for (let i = 0; i < len; i++) { const v = ring[idx]; const nv = 0.5 * (v + prev) * 0.996; prev = v; ring[idx] = nv; d[i] = v; idx = (idx + 1) % N; }
+    return (this.pluckCache[key] = b);
+  }
+  pluck(freq, t, vol = 0.5, bus = this.musicBus) {
+    const s = this.ctx.createBufferSource(); s.buffer = this.pluckBuffer(freq);
+    const f = this.ctx.createBiquadFilter(); f.type = 'peaking'; f.frequency.value = 900; f.gain.value = 4;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 2);
+    s.connect(f); f.connect(g); g.connect(bus); s.start(t); s.stop(t + 2.1);
+  }
+  // bordón tipo zanfona: dos notas sostenidas con un leve vibrato
+  drone(t, dur, f1, f2) {
+    [f1, f2].forEach((f, i) => {
+      const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+      const lfo = this.ctx.createOscillator(); lfo.frequency.value = 4.5 + i; const lg = this.ctx.createGain(); lg.gain.value = f * 0.004; lfo.connect(lg); lg.connect(o.frequency);
+      const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.Q.value = 2;
+      const g = this.ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05, t + 0.6); g.gain.setValueAtTime(0.05, t + dur - 0.6); g.gain.linearRampToValueAtTime(0, t + dur);
+      o.connect(lp); lp.connect(g); g.connect(this.musicBus); o.start(t); lfo.start(t); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
+    });
+  }
+  // flauta dulce para la melodía
+  flute(freq, t, dur, vol = 0.12) {
+    const o = this.ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
+    const lfo = this.ctx.createOscillator(); lfo.frequency.value = 5.2; const lg = this.ctx.createGain(); lg.gain.value = freq * 0.006; lfo.connect(lg); lg.connect(o.frequency);
+    const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf; const nf = this.ctx.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = freq * 2; nf.Q.value = 3; const ng = this.ctx.createGain(); ng.gain.value = 0.02;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.05); g.gain.setValueAtTime(vol * 0.85, t + dur * 0.7); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g); n.connect(nf); nf.connect(ng); ng.connect(g); g.connect(this.musicBus);
+    o.start(t); lfo.start(t); n.start(t, Math.random()); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05); n.stop(t + dur + 0.05);
+  }
+  // tambor de mano (bodhrán)
+  drum(t, vol = 0.5, low = true) {
+    const o = this.ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(low ? 110 : 180, t); o.frequency.exponentialRampToValueAtTime(low ? 50 : 90, t + 0.15);
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g); g.connect(this.musicBus); o.start(t); o.stop(t + 0.32);
+    this.noiseHit(t, 0.06, 1200, vol * 0.25, 'lowpass', this.musicBus);
+  }
+  noiseHit(t, dur, freq, vol, type = 'bandpass', bus = this.sfxBus, q = 1.5) {
+    const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f); f.connect(g); g.connect(bus); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.02);
+  }
+  tone(freq, t, dur, vol, type = 'sine', bus = this.sfxBus, endFreq) {
+    const o = this.ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t); if (endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  /* ---------- música: melodía modal en re dórico que va variando ---------- */
+  startMusic() {
+    this.playing = true;
+    const ctx = this.ctx, beat = 60 / 92 / 2; // corcheas de un 6/8 tranquilo
+    const D = 146.83, scale = [0, 2, 3, 5, 7, 9, 10, 12, 14, 15, 17, 19];
+    const f = (deg, oct = 0) => D * Math.pow(2, (scale[((deg % 7) + 7) % 7] + 12 * (Math.floor(deg / 7) + oct)) / 12);
+    const chords = [[0, 2, 4], [6, 1, 3], [0, 2, 4], [4, 6, 1], [3, 5, 0], [6, 1, 3], [4, 6, 1], [0, 2, 4]]; // i VII i v iv VII v i
+    let bar = 0, next = ctx.currentTime + 0.3, deg = 7;
+    const phrase = () => { // genera 6 corcheas de melodía con paseo suave por la escala
+      const out = [];
+      for (let i = 0; i < 6; i++) {
+        if (Math.random() < 0.18 && i % 3 !== 0) { out.push(null); continue; }
+        deg += [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)];
+        deg = Math.max(4, Math.min(12, deg));
+        out.push(deg);
+      }
+      return out;
+    };
+    const tick = () => {
+      if (!this.playing) return;
+      while (next < ctx.currentTime + 1.2) {
+        const ch = chords[bar % chords.length], t0 = next;
+        if (bar % 8 === 0) this.drone(t0, beat * 6 * 8, D / 2, D * 0.75);
+        // arpegio de laúd
+        [0, 1, 2, 1, 2, 1].forEach((k, i) => this.pluck(f(ch[k], i === 0 ? -1 : 0), t0 + i * beat, i === 0 ? 0.55 : 0.32));
+        // melodía de flauta (no siempre, para que respire)
+        const section = Math.floor(bar / 8) % 3;
+        if (section !== 2) {
+          const mel = phrase();
+          if (bar % 8 === 7) { mel.fill(null); mel[0] = ch[0] + 7; }
+          mel.forEach((d, i) => { if (d !== null) { const len = mel[i + 1] === null ? 2 : 1; this.flute(f(d), t0 + i * beat, beat * len * 0.95, 0.09); } });
+        } else {
+          // sección de laúd solo con bajos marcados
+          this.pluck(f(ch[0] + 7), t0 + beat * 3, 0.3);
+        }
+        // tambor: 1 y 4 del compás de 6/8
+        this.drum(t0, 0.35, true); this.drum(t0 + beat * 3, 0.22, false);
+        if (Math.random() < 0.4) this.drum(t0 + beat * 5, 0.12, false);
+        next += beat * 6; bar++;
+      }
+      this.musicTimer = setTimeout(tick, 300);
+    };
+    tick();
+  }
+
+  /* ---------- efectos ---------- */
+  plank(t, vol = 0.5) { // tablón de madera golpeando
+    const fr = rnd(260, 520);
+    this.tone(fr, t, 0.09, vol * 0.6, 'triangle', this.sfxBus, fr * 0.7);
+    this.noiseHit(t, 0.07, rnd(700, 1400), vol * 0.7, 'bandpass', this.sfxBus, 4);
+    this.tone(fr * 2.7, t, 0.04, vol * 0.15, 'square');
+  }
+  stone(t, vol = 0.5) { // piedra cayendo
+    this.tone(rnd(70, 110), t, 0.18, vol * 0.9, 'sine', this.sfxBus, 45);
+    this.noiseHit(t, 0.12, rnd(300, 600), vol * 0.6, 'lowpass');
+    for (let i = 0; i < 4; i++) this.noiseHit(t + 0.03 + i * rnd(0.02, 0.05), 0.04, rnd(2000, 4000), vol * 0.12, 'highpass'); // gravilla
+  }
+  hammer(t, vol = 0.5) { // martillazo sobre madera
+    this.tone(rnd(1400, 1800), t, 0.05, vol * 0.25, 'square');
+    this.plank(t, vol * 0.9);
+  }
+  bell(t, vol = 0.3) { [1, 2.76, 5.4].forEach((m, i) => this.tone(587 * m, t, 2.2 / (i + 1), vol / (i + 1), 'sine')); }
+  play(name) {
+    if (!this.ctx || !this.sfxOn) return;
+    const t = this.ctx.currentTime + 0.01;
+    switch (name) {
+      case 'road': for (let i = 0; i < 4; i++) this.plank(t + 0.45 + i * rnd(0.06, 0.11), rnd(0.35, 0.55)); break;
+      case 'settlement':
+        for (let i = 0; i < 3; i++) this.plank(t + 0.45 + i * 0.08, 0.45);
+        this.stone(t + 0.62, 0.55); this.stone(t + 0.72, 0.4);
+        [0.9, 1.15, 1.4].forEach((d) => this.hammer(t + d, 0.5)); break;
+      case 'city':
+        this.stone(t + 0.45, 0.7); this.stone(t + 0.55, 0.6); this.stone(t + 0.68, 0.5);
+        for (let i = 0; i < 2; i++) this.plank(t + 0.8 + i * 0.09, 0.4);
+        [1.0, 1.22, 1.44, 1.66].forEach((d) => this.hammer(t + d, 0.5));
+        this.bell(t + 2.0, 0.25); break;
+      case 'dice': for (let i = 0; i < 9; i++) this.plank(t + 0.25 + i * (0.06 + i * 0.02), 0.32 - i * 0.025); break;
+      case 'robber': this.noiseHit(t, 0.7, 500, 0.35, 'bandpass', this.sfxBus, 0.8); this.tone(220, t + 0.6, 0.4, 0.2, 'sawtooth', this.sfxBus, 110); break;
+      case 'produce': [0, 0.08, 0.16].forEach((d, i) => this.tone([1318, 1568, 2093][i], t + d, 0.35, 0.08)); break;
+      case 'turn': this.pluck(293.66, t, 0.4, this.sfxBus); this.pluck(440, t + 0.12, 0.35, this.sfxBus); break;
+      case 'devcard': this.noiseHit(t, 0.15, 3000, 0.15, 'highpass'); break;
+      case 'trade': [0, 0.07].forEach((d) => this.tone(2400, t + d, 0.25, 0.08)); break;
+      case 'win': [0, 4, 7, 12].forEach((s, i) => { this.tone(293.66 * Math.pow(2, s / 12), t + i * 0.18, 0.5, 0.16, 'sawtooth'); }); this.bell(t + 0.8, 0.3); break;
+    }
+  }
+}
+export const sound = new Sound();
