@@ -162,6 +162,9 @@ class Sound {
       case 'robber': this.noiseHit(t, 0.7, 500, 0.35, 'bandpass', this.sfxBus, 0.8); this.tone(220, t + 0.6, 0.4, 0.2, 'sawtooth', this.sfxBus, 110); break;
       case 'produce': [0, 0.08, 0.16].forEach((d, i) => this.tone([1318, 1568, 2093][i], t + d, 0.35, 0.08)); break;
       case 'turn': this.pluck(293.66, t, 0.4, this.sfxBus); this.pluck(440, t + 0.12, 0.35, this.sfxBus); break;
+      case 'ship': for (let i = 0; i < 3; i++) this.plank(t + 0.3 + i * 0.1, 0.4); this.noiseHit(t + 0.6, 0.9, 400, 0.4, 'lowpass', this.sfxBus, 0.7); this.noiseHit(t + 0.9, 0.25, 1800, 0.15, 'bandpass'); break;
+      case 'sail': this.noiseHit(t, 1.2, 350, 0.35, 'lowpass', this.sfxBus, 0.6); this.noiseHit(t + 0.15, 0.15, 2200, 0.12, 'bandpass', this.sfxBus, 2); this.noiseHit(t + 0.5, 0.15, 2000, 0.1, 'bandpass', this.sfxBus, 2); break;
+      case 'pirate': this.tone(90, t, 0.8, 0.6, 'sine', this.sfxBus, 40); this.noiseHit(t, 0.6, 300, 0.6, 'lowpass', this.sfxBus, 0.5); [0.4, 0.6, 0.8].forEach((d, i) => this.tone([293.66, 277.18, 220][i], t + d, 0.25, 0.18, 'sawtooth')); break;
       case 'devcard': this.noiseHit(t, 0.15, 3000, 0.15, 'highpass'); break;
       case 'trade': [0, 0.07].forEach((d) => this.tone(2400, t + d, 0.25, 0.08)); break;
       case 'win': [0, 4, 7, 12].forEach((s, i) => { this.tone(293.66 * Math.pow(2, s / 12), t + i * 0.18, 0.5, 0.16, 'sawtooth'); }); this.bell(t + 0.8, 0.3); break;

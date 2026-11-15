@@ -475,6 +475,27 @@ function roadMesh(color, len) {
   return g;
 }
 export const ROAD_PLANKS = 8, PLANK_GAP = 0.09, PLANK_FALL = 0.22;
+// barco: casco de madera, cubierta, mástil y vela del color del jugador
+function shipMesh(color) {
+  const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+  const s = new THREE.Shape(); s.moveTo(-0.17, 0); s.quadraticCurveTo(-0.15, 0.06, 0, 0.065); s.quadraticCurveTo(0.17, 0.06, 0.2, 0); s.quadraticCurveTo(0.17, -0.06, 0, -0.065); s.quadraticCurveTo(-0.15, -0.06, -0.17, 0);
+  const hull = new THREE.ExtrudeGeometry(s, { depth: 0.06, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.01, bevelSegments: 2 });
+  hull.rotateX(Math.PI / 2); hull.translate(0, 0.08, 0);
+  const wood = new THREE.MeshStandardMaterial({ color: '#7a5130', roughness: 0.75 }), dark = new THREE.MeshStandardMaterial({ color: '#4e3420', roughness: 0.8 });
+  const hm = new THREE.Mesh(hull, wood); body.add(hm);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.008, 0.1), dark); deck.position.y = 0.085; body.add(deck);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.009, 0.32, 8), dark); mast.position.set(0.0, 0.24, 0); body.add(mast);
+  const sailGeo = new THREE.PlaneGeometry(0.19, 0.17, 6, 4); const sp = sailGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) { const x = sp.getX(i), y = sp.getY(i); sp.setZ(i, 0.035 * Math.cos((x / 0.19) * Math.PI) * (0.6 + 0.4 * Math.cos((y / 0.17) * Math.PI))); }
+  sailGeo.computeVertexNormals();
+  const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide })); sail.rotation.y = Math.PI / 2; sail.position.set(0.012, 0.25, 0); body.add(sail);
+  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.21, 6), dark); yard.rotation.x = Math.PI / 2; yard.position.set(0.012, 0.34, 0); body.add(yard);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.03), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide })); flag.position.set(0.025, 0.39, 0); body.add(flag);
+  [-0.05, 0.05].forEach((z) => { const sh = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), new THREE.MeshStandardMaterial({ color: '#c9a44a', metalness: 0.6, roughness: 0.4 })); sh.scale.set(1, 1, 0.4); sh.position.set(-0.05, 0.075, z * 1.32); body.add(sh); });
+  body.scale.setScalar(1.6);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
 function robberMesh() {
   const g = new THREE.Group();
   // capa larga con pliegues (perfil de torno + ondulación)
@@ -570,6 +591,7 @@ export class Board3D {
     if (this.water2) { this.water2.material.normalMap.offset.set(-time * 0.01, time * 0.014); }
     if (this.fog) this.fog.forEach((s) => { if (s.userData.leaving) return; s.position.y = s.userData.by + Math.sin(time * 0.6 + s.userData.ph) * 0.03; s.position.x = s.userData.bx + Math.sin(time * 0.25 + s.userData.ph) * 0.04; });
     if (this.robber) this.robber.rotation.y = Math.sin(time * 0.8) * 0.4;
+    if (this.ships) for (const k in this.ships) { const m = this.ships[k]; m.children[0].position.y = Math.sin(time * 1.6 + +k) * 0.012; m.children[0].rotation.x = Math.sin(time * 1.2 + +k * 2) * 0.05; }
     if (this.tokens && this.tokens.length) { const az = Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z); this.tokens.forEach((t) => (t.rotation.y = az)); }
     if (this.markers) this.markers.children.forEach((m) => { if (m.userData.pulse) { const s = 1 + Math.sin(time * 5) * 0.18; m.scale.setScalar(s * (m.userData.base || 1)); } });
     if (this.water && this.water.material.uniforms && this.water.material.uniforms.time) this.water.material.uniforms.time.value += dt * 0.35;
@@ -585,22 +607,26 @@ export class Board3D {
     const ex = B.hexes.reduce((m, h) => Math.max(m, Math.abs(h.x), Math.abs(h.y)), 0) + 1.6;
     this.extent = ex;
     // agua profunda + capa de reflejos
-    const wm = new THREE.MeshStandardMaterial({ color: '#17628c', roughness: 0.28, metalness: 0.0, normalMap: this.waterTex, normalScale: new THREE.Vector2(0.18, 0.18), envMapIntensity: 0.8 });
+    const wm = new THREE.MeshStandardMaterial({ color: '#1a6d99', roughness: 0.22, metalness: 0.0, normalMap: this.waterTex, normalScale: new THREE.Vector2(0.25, 0.25), envMapIntensity: 0.9 });
     wm.normalMap.repeat.set(ex * 1.2, ex * 1.2);
-    if (this.hq) {
+    if (false) {
       this.water = new Water(new THREE.PlaneGeometry(ex * 8, ex * 8), { textureWidth: 1024, textureHeight: 1024, waterNormals: this.waterTex, sunDirection: this.sun.position.clone().normalize(), sunColor: 0xfff0d2, waterColor: 0x0d4f6e, distortionScale: 1.6, fog: true, alpha: 1 });
       this.water.material.uniforms.size.value = 3.5;
     } else this.water = new THREE.Mesh(new THREE.PlaneGeometry(ex * 8, ex * 8), wm);
     this.water.rotation.x = -Math.PI / 2; this.water.position.y = -0.1; this.water.receiveShadow = true; this.root.add(this.water);
     // aguas someras turquesa alrededor de la isla
     const sg = [], beach = [];
-    B.sea.forEach((s) => sg.push(paint(G_CYL6, '#5cc4d2', M(s.x, -0.115, s.y, 1.0, 0.03, 1.0))));
-    const sgm = mergeGeometries(sg); sgm.computeVertexNormals();
-    const shallow = new THREE.Mesh(sgm, new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.75, roughness: 0.55, envMapIntensity: 0.3 }));
-    shallow.position.y = 0.04; this.root.add(shallow);
+    const isSeaH = (h) => h.res === 'sea';
+    const nearLand = (x, y) => B.hexes.some((h) => !isSeaH(h) && Math.hypot(h.x - x, h.y - y) < 1.9);
+    B.sea.forEach((s) => { if (nearLand(s.x, s.y)) sg.push(paint(G_CYL6, '#5cc4d2', M(s.x, -0.115, s.y, 1.0, 0.03, 1.0))); });
+
+    if (sg.length) {
+      const sgm = mergeGeometries(sg); sgm.computeVertexNormals();
+      const shallow = new THREE.Mesh(sgm, new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.75, roughness: 0.55, envMapIntensity: 0.3 }));
+      shallow.position.y = 0.04; this.root.add(shallow);
+    }
     // playa: un reborde de arena bajo las casillas de costa
-    B.hexes.forEach((h) => beach.push(paint(G_CYL6, '#e4d3a3', M(h.x, -0.06, h.y, 1.07, 0.12, 1.07))));
-    const bm = merged(beach, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })); bm.castShadow = false; this.root.add(bm);
+    const beachMat = new THREE.MeshStandardMaterial({ color: '#e4d3a3', roughness: 0.95 }), shallowMat = new THREE.MeshStandardMaterial({ color: '#5cc4d2', transparent: true, opacity: 0.75, roughness: 0.55, envMapIntensity: 0.3 });
     // casillas
     const sideMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
     const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, normalMap: this.detailTex, normalScale: new THREE.Vector2(0.7, 0.7) });
@@ -608,11 +634,18 @@ export class Board3D {
     const sideCol = { wood: '#5d4430', sheep: '#5d4430', wheat: '#6e5634', brick: '#6a3a24', ore: '#55595e', desert: '#a8925c' };
     this.tiles = B.hexes.map((h) => {
       const g = new THREE.Group(); g.position.set(h.x, 0, h.y);
+      if (h.res === 'sea') { // casilla de mar navegable: sin tierra, solo agua (más clara junto a la costa)
+        const base = new THREE.Group();
+        if (h.nb.some((id) => B.hexes[id].res !== 'sea')) { const sh = new THREE.Mesh(G_CYL6, shallowMat); sh.position.y = -0.075; sh.scale.set(1, 0.03, 1); base.add(sh); }
+        g.add(base); this.root.add(g);
+        return { h, g, base, feat: new THREE.Group(), token: null, glow: new THREE.Mesh(), hidden: false, sea: true, T: { h: () => -0.1 } };
+      }
       const T = makeTerrain(h.res, h.x, h.y);
       const land = new THREE.Group();
       const side = merged([paint(G_SIDE, sideCol[h.res], M(0, (TOP - 0.36) / 2, 0, 1, TOP + 0.36, 1))], sideMat);
       const top = new THREE.Mesh(hexTopGeo(h.res === 'ore' ? 16 : 10, T), topMat); top.receiveShadow = true; top.castShadow = true;
-      land.add(side, top); g.add(land);
+      const beach = new THREE.Mesh(G_CYL6, beachMat); beach.position.y = -0.06; beach.scale.set(1.07, 0.12, 1.07); beach.receiveShadow = true;
+      land.add(side, top, beach); g.add(land);
       const FL = buildFeatures(h.res, T);
       const feat = new THREE.Group(); feat.add(merged(FL, featMat)); treeMeshes(FL.trees).forEach((im) => feat.add(im));
       vegetation(h.res, T, this.hq).forEach((im) => feat.add(im));
@@ -690,7 +723,8 @@ export class Board3D {
       if (revealed[t.h.id]) return;
       t.hidden = true; t.feat.visible = false; if (t.token) t.token.visible = false; t.base.visible = false;
       t.clouds = [];
-      for (let i = 0; i < 7; i++) {
+      const nC = t.sea ? 4 : 7;
+      for (let i = 0; i < nC; i++) {
         const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: i % 3 ? '#f1f4f7' : '#dfe6ec', roughness: 1, transparent: true, opacity: 0.97 }));
         const a = (i / 6) * Math.PI * 2 + rand(-0.3, 0.3), r = i === 0 ? 0 : rand(0.38, 0.62);
         const bx = t.h.x + Math.cos(a) * r, bz = t.h.y + Math.sin(a) * r, sc = i === 0 ? rand(0.5, 0.58) : rand(0.3, 0.44);
@@ -730,7 +764,28 @@ export class Board3D {
     const from = this.robber.position.clone();
     this.tween(0.9, (k) => { const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; this.robber.position.lerpVectors(from, to, e); this.robber.position.y += Math.sin(k * Math.PI) * 1.2; });
   }
+  syncShips(list, colors) {
+    this.ships = this.ships || {};
+    const seen = new Set(), B = this.B;
+    const pose = (e) => { const E = B.edges[e], a = B.verts[E.v[0]], b = B.verts[E.v[1]]; return { x: (a.x + b.x) / 2, z: (a.y + b.y) / 2, ry: -Math.atan2(b.y - a.y, b.x - a.x) }; };
+    (list || []).forEach((sh) => {
+      seen.add(sh.id);
+      let m = this.ships[sh.id];
+      const P = pose(sh.e);
+      if (!m) {
+        m = shipMesh(colors[sh.p]); m.userData = { e: sh.e, base: P }; m.position.set(P.x, -0.06, P.z); m.rotation.y = P.ry;
+        this.root.add(m); this.ships[sh.id] = m;
+        if (this.ready) { m.position.y = 0.8; this.tween(0.8, (k) => { m.position.y = -0.06 + (1 - k) * (1 - k) * 0.86; }); }
+      } else if (m.userData.e !== sh.e) {
+        const from = m.userData.base, ry0 = m.rotation.y; let dr = P.ry - ry0; while (dr > Math.PI / 2) dr -= Math.PI; while (dr < -Math.PI / 2) dr += Math.PI;
+        m.userData.e = sh.e; m.userData.base = P;
+        this.tween(1.1, (k) => { const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; m.position.x = from.x + (P.x - from.x) * e; m.position.z = from.z + (P.z - from.z) * e; m.rotation.y = ry0 + dr * e; });
+      }
+    });
+    for (const k in this.ships) if (!seen.has(+k)) { this.root.remove(this.ships[k]); delete this.ships[k]; }
+  }
   syncPieces(s, colors) {
+    if (s.ships) this.syncShips(s.ships, colors);
     const B = this.B, seenV = new Set(), seenE = new Set();
     s.buildings.forEach(([v, p, t]) => {
       seenV.add(v);
@@ -818,7 +873,7 @@ export class Board3D {
   spin(on) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = 0.6; }
 
   /* ---------- interacción (móvil): marcadores donde se puede construir y tocar para elegir ---------- */
-  setTargets(T, sel, color = '#ffffff') {
+  setTargets(T, sel, color = '#ffffff', kind = 'road') {
     if (this.markers) this.root.remove(this.markers);
     this.markers = new THREE.Group(); this.hits = [];
     const B = this.B; if (!B) return;
@@ -837,10 +892,11 @@ export class Board3D {
     T.e.forEach((id) => {
       const E = B.edges[id], a = B.verts[E.v[0]], b = B.verts[E.v[1]], s = on('e', id);
       const len = Math.hypot(b.x - a.x, b.y - a.y) * 0.62, ang = -Math.atan2(b.y - a.y, b.x - a.x);
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, s ? 0.09 : 0.06), mk('#ffffff', s)); bar.position.set((a.x + b.x) / 2, TOP + 0.05, (a.y + b.y) / 2); bar.rotation.y = ang; bar.renderOrder = 5;
+      const seaEdge = E.hexes.every((h) => B.hexes[h].res === 'sea'), ey = kind === 'ship' || seaEdge ? 0.0 : TOP + 0.05;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, s ? 0.09 : 0.06), mk(kind === 'ship' ? '#bfe9ff' : '#ffffff', s)); bar.position.set((a.x + b.x) / 2, ey, (a.y + b.y) / 2); bar.rotation.y = ang; bar.renderOrder = 5;
       if (!s) bar.userData.pulse = true;
       const hit = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, 0.32), hitMat); hit.position.copy(bar.position); hit.rotation.y = ang; hit.userData = { k: 'e', id };
-      if (s) { const ghost = roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
+      if (s) { const ghost = kind === 'ship' ? shipMesh(color) : roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, kind === 'ship' ? -0.06 : TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
       this.markers.add(bar, hit); this.hits.push(hit);
     });
     T.h.forEach((id) => {
@@ -866,4 +922,4 @@ export class Board3D {
     });
   }
 }
-export { settlementMesh, cityMesh, roadMesh, robberMesh };
+export { settlementMesh, cityMesh, roadMesh, robberMesh, shipMesh };

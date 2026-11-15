@@ -1,5 +1,5 @@
 // Jugadores automáticos: deciden una acción cada vez que les toca.
-import { RES, COST, actor, total, targets, afford, canPlayDev, rate, vp } from './engine.js';
+import { RES, COST, actor, total, targets, afford, canPlayDev, rate, vp, shipMoves, canBuildShipE, pirateTargets, vertLand, edgeSea, shipAt } from './engine.js';
 
 const pips = (n) => (n ? 6 - Math.abs(7 - n) : 0);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -24,6 +24,29 @@ function roadScore(G, e, p) {
     G.board.verts[v].adj.forEach((w) => { if (free(G, w)) best = Math.max(best, vertexScore(G, w) * 0.7); });
   });
   return best + Math.random();
+}
+// ¿es un buen destino para colonizar? (vértice libre que toca una isla nueva)
+function goalVertex(G, v) { const V = G.board.verts[v]; return free(G, v) && vertLand(G, v) && V.hexes.some((h) => G.board.hexes[h].island > 0); }
+// siguiente tramo de un barco hacia el destino más cercano (búsqueda en anchura por el mar)
+function shipStep(G, p) {
+  const moves = shipMoves(G, p, G.phase === 'roadbuild');
+  if (!moves.length) return null;
+  let best = null, bestD = 1e9;
+  moves.forEach((m) => {
+    const seen = new Set([m.to]); let frontier = [m.to], d = 0;
+    while (frontier.length && d < 14) {
+      if (frontier.some((e) => G.board.edges[e].v.some((v) => goalVertex(G, v)))) break;
+      const nxt = [];
+      frontier.forEach((e) => G.board.edges[e].v.forEach((v) => G.board.verts[v].edges.forEach((e2) => { if (!seen.has(e2) && edgeSea(G, e2) && !shipAt(G, e2)) { seen.add(e2); nxt.push(e2); } })));
+      frontier = nxt; d++;
+    }
+    if (!frontier.length) d = 99;
+    if (d < bestD || (d === bestD && Math.random() < 0.5)) { bestD = d; best = m; }
+  });
+  // si el barco ya está junto a un destino, no lo movemos
+  const docked = (G.ships || []).some((sh) => sh.id === best.id && G.board.edges[sh.e].v.some((v) => goalVertex(G, v)));
+  if (docked) return null;
+  return bestD < 99 ? { t: 'moveShip', to: best.to, id: best.id } : null;
 }
 function need(G, p) { // recurso que más le falta para su próximo objetivo
   const P = G.players[p], goal = P.setts < 5 && G.board.verts.some((V) => V.b && V.b.p === p && V.b.t === 's') && P.res.ore >= 2 ? COST.city : COST.settlement;
@@ -70,7 +93,15 @@ export function botAction(G, p) {
     if (ki >= 0 && blocked) return { t: 'playDev', i: ki };
     return { t: 'roll' };
   }
-  if (G.phase === 'roadbuild') { const T = targets(G, p, 'road').e; return { t: 'road', e: bestBy(T, (e) => roadScore(G, e, p)) }; }
+  if (G.phase === 'roadbuild') {
+    if (G.opts.ships) { const st = shipStep(G, p); if (st && Math.random() < 0.6) return st; }
+    const T = targets(G, p, 'road').e.filter((e) => G.board.edges[e].road === null && !shipAt(G, e) && (!G.opts.ships || G.board.edges[e].hexes.some((h) => G.board.hexes[h].res !== 'sea')));
+    const ok = T.filter((e) => G.board.edges[e].v.some((v) => { const V = G.board.verts[v]; return (V.b && V.b.p === p) || V.edges.some((x) => G.board.edges[x].road === p); }));
+    if (ok.length && G.players[p].roads > 0) return { t: 'road', e: bestBy(ok, (e) => roadScore(G, e, p)) };
+    const st = G.opts.ships && shipStep(G, p); if (st) return st;
+    const any = targets(G, p, null).e; if (!any.length) return { t: 'end' };
+    const mv = G.opts.ships ? shipMoves(G, p, true)[0] : null; return mv ? { t: 'moveShip', to: mv.to, id: mv.id } : { t: 'road', e: any[0] };
+  }
   if (G.phase === 'main' && G.offer && G.offer.from === p) {
     const q = Object.keys(G.offer.acc)[0];
     if (q !== undefined) return { t: 'confirm', q: +q };
@@ -80,12 +111,23 @@ export function botAction(G, p) {
   }
   if (G.phase === 'main' || G.phase === 'sbp') {
     const city = targets(G, p, 'city').v, sett = targets(G, p, 'settlement').v, road = targets(G, p, 'road').e;
+    if (G.opts.ships) {
+      const islandSpot = sett.find((v) => goalVertex(G, v));
+      if (islandSpot !== undefined && afford(G, p, COST.settlement)) return { t: 'settle', v: islandSpot };
+      if (G.phase === 'main') { const st = shipStep(G, p); if (st) return st; }
+      const myShips = (G.ships || []).filter((x) => x.p === p).length;
+      const shipSpots = targets(G, p, 'ship').e;
+      const unclaimed = G.board.hexes.some((h) => h.island > 0 && G.islandClaim[h.island] === undefined);
+      if (unclaimed && myShips < 2 && shipSpots.length && afford(G, p, COST.ship) && (sett.length < 2 || Math.random() < 0.35)) return { t: 'ship', e: pick(shipSpots) };
+      const pi = P.dev.findIndex((d, i) => d.t === 'pirate' && canPlayDev(G, p, i));
+      if (pi >= 0 && G.phase === 'main') { const ts = pirateTargets(G, p); return { t: 'playDev', i: pi, q: bestBy(ts, (q) => vp(G, q) + total(G, q) * 0.1) }; }
+    }
     if (city.length && afford(G, p, COST.city)) return { t: 'city', v: bestBy(city, (v) => vertexScore(G, v)) };
     if (sett.length && afford(G, p, COST.settlement)) return { t: 'settle', v: bestBy(sett, (v) => vertexScore(G, v, p)) };
     if (!sett.length && road.length && afford(G, p, COST.road) && P.setts > 0) return { t: 'road', e: bestBy(road, (e) => roadScore(G, e, p)) };
     if (afford(G, p, COST.dev) && G.deck.length && (P.res.ore >= 2 || Math.random() < 0.4) && !(city.length && P.res.ore < 3)) return { t: 'buyDev' };
     if (G.phase === 'main') {
-      const di = P.dev.findIndex((d, i) => canPlayDev(G, p, i) && d.t !== 'knight');
+      const di = P.dev.findIndex((d, i) => canPlayDev(G, p, i) && d.t !== 'knight' && d.t !== 'pirate');
       if (di >= 0) { const d = P.dev[di]; if (d.t !== 'road' || road.length) return { t: 'playDev', i: di, list: [need(G, p), need(G, p)], r: need(G, p) }; }
       const ki = P.dev.findIndex((d, i) => d.t === 'knight' && canPlayDev(G, p, i));
       if (ki >= 0 && Math.random() < 0.5) return { t: 'playDev', i: ki };

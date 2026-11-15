@@ -1,5 +1,5 @@
 // Mando del jugador (móvil): mano, construir, mapa con zoom, comercio.
-import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, anyRoadSpot, anySettSpot, anyCitySpot, canPlayDev, rate, actor, vp, isRevealed } from './engine.js';
+import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, anyRoadSpot, anySettSpot, anyCitySpot, canPlayDev, rate, actor, vp, isRevealed, canRoadE, pirateTargets } from './engine.js';
 import { joinRoom } from './net.js';
 import { Board3D } from './board3d.js';
 
@@ -65,6 +65,7 @@ function autoTab() {
   if (mine && key !== U.autoKey) { U.tab = 'map'; U.sel = null; }
   U.autoKey = key;
   if (U.mode && !(['main', 'sbp'].includes(G.phase) && actor(G) === U.me)) U.mode = null;
+  if (U.mode === 'move' && !targets(G, U.me, 'move').e.length) U.mode = null;
 }
 
 /* ---------- mapa 3D persistente ---------- */
@@ -103,7 +104,7 @@ function render() {
     ensure3D();
     $('#mapslot').appendChild(mapHost);
     b3.setActive(true); b3.resize();
-    b3.setTargets(curTargets(), U.sel, U.G.players[U.me].color);
+    b3.setTargets(curTargets(), U.sel, U.G.players[U.me].color, U.mode === 'ship' || U.mode === 'move' ? 'ship' : 'road');
   } else if (b3) b3.setActive(false);
   $('#modal').innerHTML = modalHTML();
   if (U.status !== 'open' && U.screen !== 'join') document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando con la pantalla<span class="dots"></span></div>`);
@@ -138,7 +139,7 @@ function phaseLine(G) {
     case 'discard': return G.discardQueue.includes(me) ? 'Tienes que descartar' : 'Esperando descartes';
     case 'robber': return G.turn === me ? 'Mueve el ladrón en el mapa' : 'Moviendo el ladrón';
     case 'steal': return G.turn === me ? 'Elige a quién robar' : 'Eligiendo a quién robar';
-    case 'roadbuild': return mine ? `Coloca ${G.rbLeft} camino${G.rbLeft > 1 ? 's' : ''} gratis` : 'Construyendo caminos';
+    case 'roadbuild': return mine ? (G.opts.ships ? `${G.rbLeft} tramo${G.rbLeft > 1 ? 's' : ''} gratis: camino o navegar` : `Coloca ${G.rbLeft} camino${G.rbLeft > 1 ? 's' : ''} gratis`) : 'Construyendo caminos';
     case 'sbp': return mine ? '🔨 Construcción extra: puedes construir' : `Construcción extra: ${esc(G.players[a].name)}`;
     default: return mine ? 'Construye, comercia o pasa' : 'Jugando su turno';
   }
@@ -158,7 +159,7 @@ function dockHTML() {
   const G = U.G, me = U.me;
   if (G.winner !== null) return '';
   if (U.sel) {
-    const what = U.sel.k === 'h' ? 'Mover el ladrón aquí' : U.sel.k === 'e' ? 'Poner camino aquí' : (U.mode === 'city' ? 'Mejorar a ciudad' : 'Poner poblado aquí');
+    const what = U.sel.k === 'h' ? 'Mover el ladrón aquí' : U.sel.k === 'e' ? (U.mode === 'ship' ? 'Botar barco aquí' : U.mode === 'move' || (G.phase === 'roadbuild' && !canRoadE(G, me, U.sel.id)) ? 'Navegar aquí' : 'Poner camino aquí') : (U.mode === 'city' ? 'Mejorar a ciudad' : 'Poner poblado aquí');
     return `<button class="ghost" data-a="unsel">Cancelar</button><button class="primary" data-a="confirm">✓ ${what}</button>`;
   }
   if (U.mode) return `<button class="ghost" data-a="cancelmode">Cancelar construcción</button>`;
@@ -176,21 +177,24 @@ function handTab() {
     ${b('road', 'Camino', COST.road, canB && afford(G, p, COST.road) && P.roads > 0 && anyRoadSpot(G, p))}
     ${b('settlement', 'Poblado', COST.settlement, canB && afford(G, p, COST.settlement) && P.setts > 0 && anySettSpot(G, p))}
     ${b('city', 'Ciudad', COST.city, canB && afford(G, p, COST.city) && P.cities > 0 && anyCitySpot(G, p))}
-    <button data-a="buydev" ${canB && afford(G, p, COST.dev) && G.deckN > 0 ? '' : 'disabled'}><span>Carta de desarrollo</span><span class="cost">${cost(COST.dev)}</span></button></div>
-    <div class="note">Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades · ${G.deckN} cartas en el mazo</div></div>`;
+    <button data-a="buydev" ${canB && afford(G, p, COST.dev) && G.deckN > 0 ? '' : 'disabled'}><span>Carta de desarrollo</span><span class="cost">${cost(COST.dev)}</span></button>
+    ${G.opts.ships ? `${b('ship', '⛵ Barco', COST.ship, canB && afford(G, p, COST.ship) && P.shipsLeft > 0 && targets(G, p, 'ship').e.length)}
+    <button data-a="build" data-k="move" ${G.phase === 'main' && G.turn === p && targets(G, p, 'move').e.length ? '' : 'disabled'}><span>🧭 Navegar</span><span class="cost">1 tramo gratis por barco</span></button>` : ''}</div>
+    <div class="note">Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades${G.opts.ships ? ` · ${P.shipsLeft} barcos` : ''} · ${G.deckN} cartas en el mazo</div></div>`;
   o += `<div class="sec"><h3>Cartas de desarrollo · ${P.dev.length}</h3>${P.dev.length ? P.dev.map((d, i) => `<div class="dev"><span style="font-size:24px">${DEV[d.t].e}</span><span class="t">${DEV[d.t].n}<small>${DEV[d.t].d}${d.bt >= G.turnNum && d.t !== 'vp' ? ' · Recién comprada' : ''}</small></span>${d.t !== 'vp' ? `<button data-a="dev" data-i="${i}" ${canPlayDev(G, p, i) ? '' : 'disabled'}>Jugar</button>` : ''}</div>`).join('') : '<div class="note">Aún no tienes ninguna.</div>'}</div>`;
   o += `<div class="sec"><h3>Costes de construcción</h3><div class="costs">
     <span>🛤️ Camino</span><span>${cost(COST.road)}</span><span class="pts">camino más largo (5+): 2 pts</span>
     <span>🏠 Poblado</span><span>${cost(COST.settlement)}</span><span class="pts">1 pt</span>
     <span>🏰 Ciudad</span><span>${cost(COST.city)}</span><span class="pts">2 pts</span>
-    <span>📜 Carta</span><span>${cost(COST.dev)}</span><span class="pts">?</span></div>
+    <span>📜 Carta</span><span>${cost(COST.dev)}</span><span class="pts">?</span>
+    ${G.opts.ships ? `<span>⛵ Barco</span><span>${cost(COST.ship)}</span><span class="pts">isla nueva: +1 pt</span>` : ''}</div>
     <div class="note">Gana quien llegue a ${G.opts.target} puntos en su turno. Mayor ejército (3+ caballeros): 2 pts.</div></div>`;
   return o;
 }
 function mapTab() {
   const G = U.G, T = curTargets();
   let hint = '';
-  if (U.mode) hint = U.mode === 'road' ? 'Toca dónde va el camino' : U.mode === 'settlement' ? 'Toca dónde va el poblado' : 'Toca el poblado que quieres mejorar';
+  if (U.mode) hint = { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que quieres mejorar', ship: 'Toca dónde botas el barco (junto a tu poblado de costa)', move: 'Toca a dónde navega tu barco' }[U.mode];
   else if (T.v.length || T.e.length || T.h.length) hint = phaseLine(G);
   if ((U.mode || G.phase === 'setup' || G.phase === 'roadbuild') && !T.v.length && !T.e.length && !T.h.length && actor(G) === U.me) hint = 'No hay sitio disponible';
   return `<div id="mapslot"></div>${hint ? `<div class="maphint">${hint}</div>` : ''}
@@ -227,7 +231,7 @@ function tradeTab() {
 }
 function infoTab() {
   const G = U.G;
-  return `<div class="sec"><h3>Jugadores · meta ${G.opts.target}</h3>${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">🃏${Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}</span><span class="vp">${Q.vp}</span></div>`).join('')}</div>
+  return `<div class="sec"><h3>Jugadores · meta ${G.opts.target}</h3>${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">🃏${Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}${G.opts.ships ? ' 🏝️' + Object.values(G.islandClaim || {}).filter((x) => x === i).length : ''}</span><span class="vp">${Q.vp}</span></div>`).join('')}</div>
     <div class="sec"><h3>Banco</h3><div class="row" style="font-weight:600">${RES.map((r) => `<span>${RINFO[r].e} ${G.bank[r]}</span>`).join('')}</div></div>
     <div class="sec"><h3>Registro</h3><div class="log">${G.log.map((l) => `<div>${l}</div>`).join('')}</div></div>
     <button class="ghost" style="width:100%" data-a="leavegame">Salir</button>`;
@@ -251,6 +255,7 @@ function modalHTML() {
     return box(`<h2>🎁 Año de abundancia</h2><p>Elige 2 recursos: ${pk.map((r) => RINFO[r].e).join(' ') || '—'}</p><div class="picker">${RES.map((r) => `<button data-a="pk" data-r="${r}" ${pk.length < 2 && G.bank[r] > pk.filter((x) => x === r).length ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span>${RINFO[r].n}</button>`).join('')}</div>
       <div class="row"><button class="ghost" data-a="mclose">Cancelar</button><button class="primary" data-a="pkok" ${pk.length === 2 ? '' : 'disabled'}>Coger</button></div>`);
   }
+  if (U.modal && U.modal.t === 'pirate') return box(`<h2>🏴‍☠️ Pirata</h2><p>Asalta los barcos de un jugador y róbale 2 recursos.</p><div class="row">${pirateTargets(G, me).map((q) => `<button data-a="pirq" data-q="${q}"><span class="chip" style="background:${G.players[q].color}"></span> ${esc(G.players[q].name)} (${G.players[q].n})</button>`).join('')}</div><button class="ghost" style="width:100%;margin-top:8px" data-a="mclose">Cancelar</button>`);
   if (U.modal && U.modal.t === 'mono') return box(`<h2>💰 Monopolio</h2><p>Todos te darán todas las cartas de ese recurso.</p><div class="picker">${RES.map((r) => `<button data-a="mono" data-r="${r}"><span class="e">${RINFO[r].e}</span>${RINFO[r].n}</button>`).join('')}</div><button class="ghost" style="width:100%" data-a="mclose">Cancelar</button>`);
   const O = G.offer;
   if (O && O.from !== me && !O.acc[me] && !O.rej[me] && U.seenOffer !== O.id && U.tab !== 'trade') {
@@ -287,7 +292,11 @@ document.addEventListener('click', (e) => {
     case 'confirm': {
       const s = U.sel; U.sel = null;
       if (s.k === 'h') send({ t: 'robber', h: s.id });
-      else if (s.k === 'e') send({ t: 'road', e: s.id });
+      else if (s.k === 'e') {
+        if (U.mode === 'ship') send({ t: 'ship', e: s.id });
+        else if (U.mode === 'move' || (G.phase === 'roadbuild' && !canRoadE(G, U.me, s.id))) send({ t: 'moveShip', to: s.id });
+        else send({ t: 'road', e: s.id });
+      }
       else send({ t: U.mode === 'city' ? 'city' : 'settle', v: s.id });
       if (G.phase !== 'roadbuild') U.mode = null;
       render(); break;
@@ -297,6 +306,7 @@ document.addEventListener('click', (e) => {
       const card = G.players[U.me].dev[+d.i];
       if (card.t === 'plenty') { U.modal = { t: 'plenty', i: +d.i, pick: [] }; render(); }
       else if (card.t === 'mono') { U.modal = { t: 'mono', i: +d.i }; render(); }
+      else if (card.t === 'pirate') { U.modal = { t: 'pirate', i: +d.i }; render(); }
       else send({ t: 'playDev', i: +d.i });
       break;
     }
@@ -304,6 +314,7 @@ document.addEventListener('click', (e) => {
     case 'pkok': send({ t: 'playDev', i: U.modal.i, list: U.modal.pick }); U.modal = null; render(); break;
     case 'mono': send({ t: 'playDev', i: U.modal.i, r: d.r }); U.modal = null; render(); break;
     case 'mclose': U.modal = null; render(); break;
+    case 'pirq': send({ t: 'playDev', i: U.modal.i, q: +d.q }); U.modal = null; render(); break;
     case 'cnt': {
       const o = d.k === 'disc' ? (U.disc = U.disc || {}) : U.trade[d.k];
       o[d.r] = Math.max(0, (o[d.r] || 0) + +d.d); render(); break;

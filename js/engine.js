@@ -13,16 +13,18 @@ export const RINFO = {
 };
 export const COST = {
   road: { wood: 1, brick: 1 },
+  ship: { wood: 1, sheep: 1 },
   settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
   city: { wheat: 2, ore: 3 },
   dev: { sheep: 1, wheat: 1, ore: 1 },
 };
 export const DEV = {
   knight: { n: 'Caballero', e: '⚔️', d: 'Mueve el ladrón y roba una carta. Se puede jugar antes de tirar.' },
-  road: { n: 'Construcción de caminos', e: '🛤️', d: 'Construye 2 caminos gratis.' },
+  road: { n: 'Construcción de caminos', e: '🛤️', d: 'Construye 2 caminos gratis (con barcos: también puedes navegar 2 tramos).' },
   plenty: { n: 'Año de abundancia', e: '🎁', d: 'Coge 2 recursos cualesquiera del banco.' },
   mono: { n: 'Monopolio', e: '💰', d: 'Elige un recurso: todos te dan los suyos.' },
   vp: { n: 'Punto de victoria', e: '⭐', d: '+1 punto. Secreto hasta el final.' },
+  pirate: { n: 'Pirata', e: '🏴‍☠️', d: 'Roba 2 recursos a un jugador que tenga algún barco en el mar.' },
 };
 export const COLORS = [
   { k: 'red', n: 'Rojo', c: '#e53935' }, { k: 'blue', n: 'Azul', c: '#1e88e5' },
@@ -47,19 +49,19 @@ export function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = 
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ---------------- Generación de mapa ---------------- */
-export function genBoard(N) {
-  const S = 1, W = Math.sqrt(3) * S;
-  // candidatos en coordenadas axiales, elegimos los N más cercanos al centro (algo más ancho que alto para pantallas 16:9)
+const D6 = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const W3 = Math.sqrt(3);
+const ck = (q, r) => q + ',' + r;
+const hexDist = (q, r) => (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+// isla compacta de N casillas alrededor del origen (algo más ancha que alta)
+function blob(N, jitter = 0.3) {
   const R = Math.ceil(Math.sqrt(N)) + 3, cand = [];
   for (let q = -R; q <= R; q++) for (let r = -R; r <= R; r++) {
-    const x = W * (q + r / 2), y = 1.5 * S * r;
-    const d = Math.hypot(x / 1.22, y) + Math.random() * 0.3;
-    cand.push({ q, r, x, y, d });
+    const x = W3 * (q + r / 2), y = 1.5 * r;
+    cand.push({ q, r, x, y, d: Math.hypot(x / 1.22, y) + Math.random() * jitter });
   }
   cand.sort((a, b) => a.d - b.d);
   // sin lagunas interiores: si una casilla vacía queda rodeada, la rellenamos y quitamos la más exterior
-  const ck = (q, r) => q + ',' + r;
-  const D6 = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
   const sel = new Map(cand.slice(0, N).map((c) => [ck(c.q, c.r), c]));
   const nbCount = (c) => D6.filter(([a, b]) => sel.has(ck(c.q + a, c.r + b))).length;
   for (let it = 0; it < 50; it++) {
@@ -69,13 +71,44 @@ export function genBoard(N) {
     const worst = [...sel.values()].filter((c) => c !== hole).sort((a, b) => nbCount(a) - nbCount(b) || b.d - a.d)[0];
     sel.delete(ck(worst.q, worst.r));
   }
-  const hexes = [...sel.values()].map((c, i) => ({ id: i, q: c.q, r: c.r, x: c.x, y: c.y }));
-  // centrar
-  // los vértices se calculan en coordenadas exactas de rejilla; el centrado se aplica después
-  const key = (q, r) => q + ',' + r, byKey = {};
+  return [...sel.values()].map((c) => ({ q: c.q, r: c.r, island: 0 }));
+}
+// archipiélago: isla principal + islas pequeñas separadas por mar, todo rodeado de casillas de mar jugables
+function archipelago(N) {
+  const M = Math.max(12, Math.round(N * 0.58));
+  const land = new Map(blob(M, 0.5).map((c) => [ck(c.q, c.r), c]));
+  const rMain = Math.max(...[...land.values()].map((c) => hexDist(c.q, c.r)));
+  let remaining = N - M, id = 1, tries = 0;
+  const touchesOther = (q, r, isl) => D6.some(([a, b]) => { const o = land.get(ck(q + a, r + b)); return o && o.island !== isl; });
+  while (remaining > 0 && tries++ < 800) {
+    let size = Math.min(remaining, 2 + rnd(3)); if (remaining - size === 1) size++;
+    const ang = Math.random() * Math.PI * 2, dist = rMain + 2 + Math.random() * 2.2;
+    const fx = Math.cos(ang) * dist * 1.2, fy = Math.sin(ang) * dist;
+    const r0 = Math.round(fy / 1.5 * 1.5 / 1.5), q0 = Math.round(fx / W3 - r0 / 2);
+    if (land.has(ck(q0, r0)) || touchesOther(q0, r0, id)) continue;
+    const cells = [{ q: q0, r: r0, island: id }]; land.set(ck(q0, r0), cells[0]);
+    for (let g = 0; g < 40 && cells.length < size; g++) {
+      const base = cells[rnd(cells.length)], [a, b] = D6[rnd(6)], q = base.q + a, r = base.r + b;
+      if (land.has(ck(q, r)) || touchesOther(q, r, id)) continue;
+      const c = { q, r, island: id }; cells.push(c); land.set(ck(q, r), c);
+    }
+    remaining -= cells.length; id++;
+  }
+  // mar navegable: todo lo que esté a 2 casillas o menos de alguna tierra
+  const out = [...land.values()], seaSet = new Set();
+  land.forEach((c) => { for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) { if (hexDist(dq, dr) > 2) continue; const k = ck(c.q + dq, c.r + dr); if (!land.has(k) && !seaSet.has(k)) { seaSet.add(k); out.push({ q: c.q + dq, r: c.r + dr, island: -1, sea: true }); } } });
+  return out;
+}
+export function genBoard(N, opts = {}) {
+  const S = 1, W = W3;
+  const cells = opts.ships ? archipelago(N) : blob(N);
+  const hexes = cells.map((c, i) => ({ id: i, q: c.q, r: c.r, x: W * (c.q + c.r / 2), y: 1.5 * c.r, island: c.island, sea: !!c.sea }));
+  const key = ck, byKey = {};
   hexes.forEach((h) => (byKey[key(h.q, h.r)] = h));
-  const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  const DIRS = D6;
   hexes.forEach((h) => (h.nb = DIRS.map(([dq, dr]) => byKey[key(h.q + dq, h.r + dr)]).filter(Boolean).map((o) => o.id)));
+  const landH = hexes.filter((h) => !h.sea);
+  N = landH.length;
 
   // tipos de terreno en la proporción del original
   const deserts = Math.max(1, Math.round(N / 19)), L = N - deserts;
@@ -87,13 +120,16 @@ export function genBoard(N) {
   for (let i = 0; used < L; i++, used++) counts[rem[i % rem.length][1]]++;
   const types = [];
   for (const k in counts) for (let i = 0; i < counts[k]; i++) types.push(k);
-  for (let i = 0; i < deserts; i++) types.push('desert');
-  // los desiertos mejor hacia el interior o repartidos; barajamos y punto
   shuffle(types);
-  hexes.forEach((h, i) => { h.res = types[i]; h.num = null; });
+  // los desiertos van en la isla principal
+  const mainIdx = landH.map((h, i) => (h.island === 0 ? i : -1)).filter((i) => i >= 0);
+  const desertIdx = new Set(shuffle(mainIdx).slice(0, deserts));
+  let ti = 0;
+  landH.forEach((h, i) => { h.res = desertIdx.has(i) ? 'desert' : types[ti++] || 'sheep'; h.num = null; });
+  hexes.forEach((h) => { if (h.sea) { h.res = 'sea'; h.num = null; } });
 
   // números: el 6 y el 8 nunca juntos; si se puede, tampoco dos iguales juntos
-  const land = hexes.filter((h) => h.res !== 'desert');
+  const land = landH.filter((h) => h.res !== 'desert');
   const base = [2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 3, 4, 5, 6, 8, 9, 10, 11];
   const pool = [];
   for (let i = 0; pool.length < land.length; i++) pool.push(base[i % base.length]);
@@ -103,7 +139,7 @@ export function genBoard(N) {
   let ok = false;
   for (let t = 0; t < 3000 && !ok; t++) { shuffle(pool); land.forEach((h, i) => (h.num = pool[i])); ok = strict(); }
   for (let t = 0; t < 20000 && !ok; t++) { shuffle(pool); land.forEach((h, i) => (h.num = pool[i])); ok = loose(); }
-  if (!ok) { // reparación: intercambiar números calientes con fríos hasta que no se toquen
+  if (!ok) {
     for (let t = 0; t < 5000; t++) {
       const bad = land.find((h) => hot(h.num) && h.nb.some((id) => hot(hexes[id].num)));
       if (!bad) break;
@@ -137,12 +173,12 @@ export function genBoard(N) {
     }
   });
 
-  const cx = hexes.reduce((s, h) => s + h.x, 0) / N, cy = hexes.reduce((s, h) => s + h.y, 0) / N;
+  const cx = landH.reduce((s, h) => s + h.x, 0) / landH.length, cy = landH.reduce((s, h) => s + h.y, 0) / landH.length;
   hexes.forEach((h) => { h.x -= cx; h.y -= cy; });
   verts.forEach((v) => { v.x -= cx; v.y -= cy; });
 
   // puertos repartidos por la costa (recorrido ordenado alrededor del perímetro)
-  const coast = edges.filter((e) => e.hexes.length === 1);
+  const coast = edges.filter((e) => { const lh = e.hexes.filter((id) => !hexes[id].sea); return lh.length === 1 && hexes[lh[0]].island === 0; });
   const ordered = orderCoast(coast, verts);
   const P = Math.max(9, Math.round(ordered.length / 3.4));
   const generic = Math.round((P * 4) / 9);
@@ -157,7 +193,7 @@ export function genBoard(N) {
     for (let s = 0; s < 3 && e.v.some((v) => usedV.has(v)); s++) e = ordered[(idx + s + 1) % ordered.length];
     if (e.v.some((v) => usedV.has(v))) continue;
     e.v.forEach((v) => usedV.add(v));
-    const h = hexes[e.hexes[0]], a = verts[e.v[0]], b = verts[e.v[1]];
+    const h = hexes[e.hexes.find((id) => !hexes[id].sea)], a = verts[e.v[0]], b = verts[e.v[1]];
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = mx - h.x, dy = my - h.y, d = Math.hypot(dx, dy);
     ports.push({ type: ptypes[i], e: e.id, hex: h.id, x: mx + (dx / d) * 0.6, y: my + (dy / d) * 0.6 });
     e.v.forEach((v) => (verts[v].port = ptypes[i]));
@@ -205,9 +241,11 @@ export function newGame(opts) {
   // opts: {players:[{name,color}], density, fog, target, sbp}
   const np = opts.players.length;
   const N = hexCountFor(np, opts.density);
-  const board = genBoard(N);
+  if (opts.ships) opts.fog = true;
+  const board = genBoard(N, { ships: !!opts.ships });
   const f = Math.max(1, np / 4);
   const devCounts = { knight: Math.round(14 * f), vp: 5 + Math.max(0, np - 6), road: Math.round(2 * f), plenty: Math.round(2 * f), mono: Math.round(2 * f) };
+  if (opts.ships) devCounts.pirate = Math.round(2 * f);
   const deck = [];
   for (const k in devCounts) for (let i = 0; i < devCounts[k]; i++) deck.push(k);
   shuffle(deck);
@@ -217,12 +255,16 @@ export function newGame(opts) {
   const order = [...Array(np)].map((_, i) => (start + i) % np);
   const G = {
     v: 2, opts, N, bankN, board, bank, deck,
-    players: opts.players.map((p) => ({ name: p.name, color: p.color, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 }, dev: [], knights: 0, roads: 15, setts: 5, cities: 4 })),
+    players: opts.players.map((p) => ({ name: p.name, color: p.color, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 }, dev: [], knights: 0, roads: 15, setts: 5, cities: 4, shipsLeft: 3 })),
+    ships: [], shipSeq: 0, islandClaim: {},
     turn: start, first: start, turnNum: 0, phase: 'setup', setupIdx: 0, setupOrder: [...order, ...order.slice().reverse()], setupSub: 'settlement', lastSett: null,
     dice: null, rollId: 0, playedDev: false, longest: null, army: null, roadLens: Array(np).fill(0), log: [], winner: null,
     sbpQueue: [], discardQueue: [], afterRobber: null, rbLeft: 0, revealed: {}, stealCands: [], offer: null, ev: [],
   };
-  log(G, `Empieza <b>${pn(G, start)}</b>. Colocad los primeros poblados.`);
+  if (opts.ships) { // se ve la isla principal y el mar que la rodea
+    board.hexes.forEach((h) => { if (h.island === 0 || (h.sea && h.nb.some((id) => board.hexes[id].island === 0))) G.revealed[h.id] = true; });
+  }
+  log(G, `Empieza <b>${pn(G, start)}</b>. Colocad los primeros poblados${opts.ships ? ' en la isla principal' : ''}.`);
   return G;
 }
 export function log(G, m) { G.log.unshift(m); if (G.log.length > 60) G.log.length = 60; }
@@ -234,17 +276,39 @@ export function actor(G) {
   return G.turn;
 }
 export const isRevealed = (G, h) => !G.opts.fog || !!G.revealed[h];
+export const isSea = (G, h) => G.board.hexes[h].res === 'sea';
+export const vertLand = (G, v) => G.board.verts[v].hexes.some((h) => !isSea(G, h));
+export const edgeLand = (G, e) => G.board.edges[e].hexes.some((h) => !isSea(G, h));
+export const edgeSea = (G, e) => !!G.opts.ships && G.board.edges[e].hexes.some((h) => isSea(G, h));
+export const shipAt = (G, e) => (G.ships || []).find((s) => s.e === e);
+const shipTouches = (G, p, v) => (G.ships || []).some((s) => s.p === p && G.board.edges[s.e].v.includes(v));
+export function canBuildShipE(G, p, e) {
+  if (!G.opts.ships || !edgeSea(G, e) || shipAt(G, e)) return false;
+  return G.board.edges[e].v.some((v) => { const b = G.board.verts[v].b; return b && b.p === p; });
+}
+// barcos que se pueden mover y a dónde (1 tramo por barco y turno; free = carta de caminos/millas)
+export function shipMoves(G, p, free) {
+  const out = [];
+  (G.ships || []).forEach((s) => {
+    if (s.p !== p) return;
+    if (!free && (s.mv >= G.turnNum || s.bt >= G.turnNum)) return;
+    G.board.edges[s.e].v.forEach((v) => G.board.verts[v].edges.forEach((e) => { if (e !== s.e && edgeSea(G, e) && !shipAt(G, e)) out.push({ id: s.id, to: e }); }));
+  });
+  return out;
+}
 export function afford(G, p, c) { return Object.entries(c).every(([r, n]) => G.players[p].res[r] >= n); }
 function pay(G, p, c) { for (const [r, n] of Object.entries(c)) { G.players[p].res[r] -= n; G.bank[r] += n; } }
 export function canSettleV(G, p, v, setup) {
   const V = G.board.verts[v];
   if (V.b || V.adj.some((a) => G.board.verts[a].b)) return false;
-  if (setup) return true;
-  return V.edges.some((e) => G.board.edges[e].road === p);
+  if (G.opts.ships && !vertLand(G, v)) return false;
+  if (setup) return !G.opts.ships || V.hexes.some((h) => G.board.hexes[h].island === 0);
+  return V.edges.some((e) => G.board.edges[e].road === p) || shipTouches(G, p, v);
 }
 export function canRoadE(G, p, e, fromV) {
   const E = G.board.edges[e];
   if (E.road !== null) return false;
+  if (G.opts.ships && !edgeLand(G, e)) return false;
   if (fromV !== undefined && fromV !== null) return E.v.includes(fromV);
   return E.v.some((v) => {
     const V = G.board.verts[v];
@@ -262,6 +326,7 @@ export function vp(G, p, hidden) {
   if (G.longest === p) s += 2;
   if (G.army === p) s += 2;
   if (hidden) s += G.players[p].dev.filter((d) => d.t === 'vp').length;
+  for (const k in G.islandClaim || {}) if (G.islandClaim[k] === p) s += 1;
   return s;
 }
 export function rate(G, p, r) {
@@ -269,7 +334,7 @@ export function rate(G, p, r) {
   G.board.verts.forEach((V) => { if (V.b && V.b.p === p && V.port) { if (V.port === r) best = 2; else if (V.port === 'any') best = Math.min(best, 3); } });
   return best;
 }
-export function robberTargets(G) { return G.board.hexes.filter((h) => h.id !== G.board.robber && isRevealed(G, h.id)).map((h) => h.id); }
+export function robberTargets(G) { return G.board.hexes.filter((h) => h.id !== G.board.robber && h.res !== 'sea' && isRevealed(G, h.id)).map((h) => h.id); }
 // Qué puede tocar el jugador p en el mapa ahora mismo. mode: 'road'|'settlement'|'city'|null
 export function targets(G, p, mode) {
   const T = { v: [], e: [], h: [] };
@@ -283,28 +348,43 @@ export function targets(G, p, mode) {
   }
   if (G.phase === 'robber') { if (G.turn === p) T.h = robberTargets(G); return T; }
   if (actor(G) !== p) return T;
-  if (G.phase === 'roadbuild') mode = 'road';
   if (!['main', 'sbp', 'roadbuild'].includes(G.phase)) return T;
   const P = G.players[p];
+  if (G.phase === 'roadbuild') {
+    if (P.roads > 0) B.edges.forEach((E) => { if (canRoadE(G, p, E.id)) T.e.push(E.id); });
+    if (G.opts.ships) shipMoves(G, p, true).forEach((m) => { if (!T.e.includes(m.to)) T.e.push(m.to); });
+    return T;
+  }
+  if (mode === 'ship' && P.shipsLeft > 0) B.edges.forEach((E) => { if (canBuildShipE(G, p, E.id)) T.e.push(E.id); });
+  if (mode === 'move') shipMoves(G, p, false).forEach((m) => { if (!T.e.includes(m.to)) T.e.push(m.to); });
   if (mode === 'road' && P.roads > 0) B.edges.forEach((E) => { if (canRoadE(G, p, E.id)) T.e.push(E.id); });
   if (mode === 'settlement' && P.setts > 0) B.verts.forEach((V) => { if (canSettleV(G, p, V.id, false)) T.v.push(V.id); });
   if (mode === 'city' && P.cities > 0) B.verts.forEach((V) => { if (canCityV(G, p, V.id)) T.v.push(V.id); });
   return T;
 }
+export function pirateTargets(G, p) { return G.players.map((_, q) => q).filter((q) => q !== p && total(G, q) > 0 && (G.ships || []).some((s) => s.p === q)); }
 export function canPlayDev(G, p, i) {
   const d = G.players[p].dev[i];
+  if (d && d.t === 'pirate' && !pirateTargets(G, p).length) return false;
   return p === G.turn && !!d && d.t !== 'vp' && !G.playedDev && d.bt < G.turnNum && G.winner === null &&
     (G.phase === 'main' || (G.phase === 'roll' && d.t === 'knight'));
 }
 
 /* ---- efectos internos ---- */
-function reveal(G) {
+function reveal(G, by) {
   if (!G.opts.fog) return;
   const V = G.board.verts, nw = [];
   const mark = (v) => V[v].hexes.forEach((h) => { if (!G.revealed[h]) { G.revealed[h] = true; nw.push(h); } });
   V.forEach((v) => { if (v.b) mark(v.id); });
   G.board.edges.forEach((e) => { if (e.road !== null) e.v.forEach(mark); });
+  (G.ships || []).forEach((s) => G.board.edges[s.e].v.forEach((v) => { mark(v); V[v].adj.forEach(mark); }));
   if (nw.length) G.ev.push({ t: 'reveal', hexes: nw });
+  // al explorar con barcos, descubrir tierra da un recurso de ese tipo
+  if (G.opts.ships && by !== undefined && G.phase !== 'setup') {
+    const got = [];
+    nw.forEach((h) => { const r = G.board.hexes[h].res; if (RES.includes(r) && G.bank[r] > 0) { G.bank[r]--; G.players[by].res[r]++; got.push(RINFO[r].e); } });
+    if (got.length) { log(G, `🧭 <b>${pn(G, by)}</b> descubre tierra y recibe ${got.join(' ')}`); G.ev.push({ t: 'gain', to: by, m: `¡Tierra a la vista! Recibes ${got.join(' ')}` }); }
+  }
 }
 export function roadLen(G, p) {
   const E = G.board.edges, V = G.board.verts, used = new Set();
@@ -352,9 +432,15 @@ function checkWin(G) {
     G.ev.push({ t: 'win', p });
   }
 }
-function placeSettlement(G, p, v) { G.board.verts[v].b = { p, t: 's' }; G.players[p].setts--; G.ev.push({ t: 'build', k: 's', id: v, p }); reveal(G); updateLongest(G); }
+function placeSettlement(G, p, v) {
+  G.board.verts[v].b = { p, t: 's' }; G.players[p].setts--; G.ev.push({ t: 'build', k: 's', id: v, p }); reveal(G, p); updateLongest(G);
+  if (G.opts.ships && G.phase !== 'setup') { // primera colonia en una isla nueva: +1 punto
+    const isl = [...new Set(G.board.verts[v].hexes.map((h) => G.board.hexes[h].island).filter((i) => i > 0))];
+    isl.forEach((k) => { if (G.islandClaim[k] === undefined) { G.islandClaim[k] = p; log(G, `⛵ <b>${pn(G, p)}</b> coloniza una isla nueva (+1 punto)`); G.ev.push({ t: 'banner', m: `⛵ ${G.players[p].name} coloniza una isla nueva (+1)` }); } });
+  }
+}
 function placeCity(G, p, v) { G.board.verts[v].b.t = 'c'; G.players[p].setts++; G.players[p].cities--; G.ev.push({ t: 'build', k: 'c', id: v, p }); }
-function placeRoad(G, p, e) { G.board.edges[e].road = p; G.players[p].roads--; G.ev.push({ t: 'build', k: 'r', id: e, p }); reveal(G); updateLongest(G); }
+function placeRoad(G, p, e) { G.board.edges[e].road = p; G.players[p].roads--; G.ev.push({ t: 'build', k: 'r', id: e, p }); reveal(G, p); updateLongest(G); }
 function produce(G, n) {
   const B = G.board, gains = G.players.map(() => ({})), hexes = [];
   B.hexes.forEach((h) => {
@@ -465,13 +551,40 @@ export function act(G, p, a) {
       if (!canRoadE(G, p, e)) return 'El camino tiene que conectar con lo tuyo';
       if (G.phase === 'roadbuild') {
         placeRoad(G, p, e); G.rbLeft--;
-        if (G.rbLeft <= 0 || me.roads <= 0 || !anyRoadSpot(G, p)) G.phase = 'main';
+        if (G.rbLeft <= 0 || !targets(G, p, null).e.length) G.phase = 'main';
         checkWin(G); return null;
       }
       if (!['main', 'sbp'].includes(G.phase)) return 'Ahora no puedes construir';
       if (!afford(G, p, COST.road)) return 'No tienes recursos suficientes';
       pay(G, p, COST.road); placeRoad(G, p, e);
       log(G, `<b>${pn(G, p)}</b> construye un camino`); checkWin(G);
+      return null;
+    }
+    case 'ship': {
+      const e = a.e | 0;
+      if (!G.opts.ships) return 'No hay barcos en este modo';
+      if (!isActor || !['main', 'sbp'].includes(G.phase)) return 'Ahora no puedes construir';
+      if (me.shipsLeft <= 0) return 'No te quedan barcos';
+      if (!afford(G, p, COST.ship)) return 'No tienes recursos suficientes';
+      if (!G.board.edges[e] || !canBuildShipE(G, p, e)) return 'El barco tiene que salir de un poblado tuyo en la costa';
+      pay(G, p, COST.ship); me.shipsLeft--;
+      const sh = { id: ++G.shipSeq, p, e, bt: G.turnNum, mv: -1 }; G.ships.push(sh);
+      G.ev.push({ t: 'build', k: 'b', id: e, p, ship: sh.id });
+      log(G, `⛵ <b>${pn(G, p)}</b> bota un barco`); reveal(G, p);
+      return null;
+    }
+    case 'moveShip': {
+      const to = a.to | 0;
+      if (!G.opts.ships || !isActor) return 'Ahora no puedes mover barcos';
+      const free = G.phase === 'roadbuild';
+      if (!free && G.phase !== 'main') return 'Solo en tu turno';
+      const mv = shipMoves(G, p, free).filter((m) => m.to === to && (a.id === undefined || m.id === a.id))[0];
+      if (!mv) return 'El barco no puede ir ahí';
+      const sh = G.ships.find((x) => x.id === mv.id), from = sh.e;
+      sh.e = to; if (!free) sh.mv = G.turnNum;
+      G.ev.push({ t: 'sail', id: sh.id, from, to, p });
+      reveal(G, p);
+      if (free) { G.rbLeft--; if (G.rbLeft <= 0 || !targets(G, p, null).e.length) G.phase = 'main'; }
       return null;
     }
     case 'roll': {
@@ -536,11 +649,18 @@ export function act(G, p, a) {
         if (!Object.entries(need).every(([r, n]) => G.bank[r] >= n)) return 'El banco no tiene esos recursos';
       }
       if (d.t === 'mono' && !RES.includes(a.r)) return 'Elige un recurso';
+      if (d.t === 'pirate' && !pirateTargets(G, p).includes(a.q)) return 'Elige un jugador con barcos';
       me.dev.splice(i, 1); G.playedDev = true;
       log(G, `<b>${pn(G, p)}</b> juega ${DEV[d.t].e} ${DEV[d.t].n}`);
       G.ev.push({ t: 'banner', m: `${DEV[d.t].e} ${G.players[p].name} juega ${DEV[d.t].n}` });
       if (d.t === 'knight') { me.knights++; updateArmy(G); checkWin(G); if (G.winner !== null) return null; G.afterRobber = G.phase; G.phase = 'robber'; skipRobberIfNoTarget(G); }
-      else if (d.t === 'road') { G.rbLeft = Math.min(2, me.roads); if (G.rbLeft > 0 && anyRoadSpot(G, p)) G.phase = 'roadbuild'; }
+      else if (d.t === 'road') { G.rbLeft = G.opts.ships ? 2 : Math.min(2, me.roads); if (G.rbLeft > 0 && (anyRoadSpot(G, p) || (G.opts.ships && shipMoves(G, p, true).length))) G.phase = 'roadbuild'; }
+      else if (d.t === 'pirate') {
+        const q = a.q, P2 = G.players[q], got = [];
+        for (let k = 0; k < 2; k++) { const pool = []; RES.forEach((r) => { for (let i = 0; i < P2.res[r]; i++) pool.push(r); }); if (!pool.length) break; const r = pool[rnd(pool.length)]; P2.res[r]--; me.res[r]++; got.push(r); }
+        log(G, `🏴‍☠️ <b>${pn(G, p)}</b> asalta los barcos de <b>${pn(G, q)}</b> y le roba ${got.length} cartas`);
+        G.ev.push({ t: 'gain', to: p, m: `Botín pirata: ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'gain', to: q, m: `¡Piratas! Te roban ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'pirate', p, q });
+      }
       else if (d.t === 'plenty') { a.list.slice(0, 2).forEach((r) => { G.bank[r]--; me.res[r]++; }); log(G, `<b>${pn(G, p)}</b> coge ${a.list.slice(0, 2).map((r) => RINFO[r].e).join(' ')} del banco`); }
       else if (d.t === 'mono') {
         let n = 0;
@@ -621,7 +741,7 @@ export function boardStatic(G) {
   const B = G.board;
   return {
     S: B.S, W: B.W,
-    hexes: B.hexes.map((h) => ({ id: h.id, x: h.x, y: h.y, res: h.res, num: h.num, verts: h.verts, nb: h.nb })),
+    hexes: B.hexes.map((h) => ({ id: h.id, x: h.x, y: h.y, res: h.res, num: h.num, verts: h.verts, nb: h.nb, island: h.island })),
     verts: B.verts.map((v) => ({ id: v.id, x: v.x, y: v.y, hexes: v.hexes, adj: v.adj, edges: v.edges, port: v.port })),
     edges: B.edges.map((e) => ({ id: e.id, v: e.v, hexes: e.hexes })),
     ports: B.ports, sea: B.sea,
@@ -633,11 +753,12 @@ export function publicState(G, forP) {
     phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
     robber: B.robber, revealed: G.revealed, longest: G.longest, army: G.army, roadLens: G.roadLens, winner: G.winner,
     playedDev: G.playedDev, rbLeft: G.rbLeft, sbpQueue: G.sbpQueue, discardQueue: G.discardQueue, stealCands: G.stealCands, offer: G.offer,
-    deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp },
+    deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships },
+    ships: G.ships || [], islandClaim: G.islandClaim || {},
     buildings: B.verts.filter((v) => v.b).map((v) => [v.id, v.b.p, v.b.t]),
     roads: B.edges.filter((e) => e.road !== null).map((e) => [e.id, e.road]),
     players: G.players.map((P, i) => ({
-      name: P.name, color: P.color, n: total(G, i), devN: P.dev.length, knights: P.knights, roads: P.roads, setts: P.setts, cities: P.cities,
+      name: P.name, color: P.color, n: total(G, i), devN: P.dev.length, knights: P.knights, roads: P.roads, setts: P.setts, cities: P.cities, shipsLeft: P.shipsLeft,
       vp: vp(G, i, G.winner !== null || i === forP),
       res: i === forP ? P.res : null, dev: i === forP ? P.dev : null,
     })),
