@@ -148,7 +148,7 @@ class Sound {
     if (!this.ctx || !this.sfxOn) return;
     const t = this.ctx.currentTime + 0.01;
     switch (name) {
-      case 'road': for (let i = 0; i < 4; i++) this.plank(t + 0.45 + i * rnd(0.06, 0.11), rnd(0.35, 0.55)); break;
+      case 'road': for (let i = 0; i < 8; i++) this.plank(t + 0.22 + i * 0.09, rnd(0.4, 0.55)); break; // un tac por tablón (sincronizado con la animación)
       case 'settlement':
         for (let i = 0; i < 3; i++) this.plank(t + 0.45 + i * 0.08, 0.45);
         this.stone(t + 0.62, 0.55); this.stone(t + 0.72, 0.4);
