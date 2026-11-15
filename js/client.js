@@ -200,8 +200,8 @@ function mapTab() {
   return `<div id="mapslot"></div>${hint ? `<div class="maphint">${hint}</div>` : ''}
     <div class="zoom"><button data-a="zin">+</button><button data-a="zout">−</button><button data-a="zfit">⤢</button></div>`;
 }
-function counter(obj, key, max) {
-  return `<div class="cnt">${RES.map((r) => `<div class="c"><div class="e">${RINFO[r].e}</div><div class="v">${obj[r] || 0}</div><div class="b"><button data-a="cnt" data-k="${key}" data-r="${r}" data-d="-1" ${(obj[r] || 0) <= 0 ? 'disabled' : ''}>−</button><button data-a="cnt" data-k="${key}" data-r="${r}" data-d="1" ${max && (obj[r] || 0) >= max[r] ? 'disabled' : ''}>+</button></div></div>`).join('')}</div>`;
+function counter(obj, key, max, have) {
+  return `<div class="cnt">${RES.map((r) => `<div class="c"><div class="e">${RINFO[r].e}</div>${have ? `<div class="note" style="margin:0;font-size:12px">tienes ${have[r]}</div>` : ''}<div class="v">${obj[r] || 0}</div><div class="b"><button data-a="cnt" data-k="${key}" data-r="${r}" data-d="-1" ${(obj[r] || 0) <= 0 ? 'disabled' : ''}>−</button><button data-a="cnt" data-k="${key}" data-r="${r}" data-d="1" ${max && (obj[r] || 0) >= max[r] ? 'disabled' : ''}>+</button></div></div>`).join('')}</div>`;
 }
 function tradeTab() {
   const G = U.G, p = U.me, P = G.players[p], myTurn = G.turn === p && G.phase === 'main' && G.winner === null, O = G.offer;
@@ -217,6 +217,7 @@ function tradeTab() {
     G.players.forEach((Q, i) => { if (i === p) return; const s = O.acc[i] ? 'acepta' : O.rej[i] ? 'rechaza' : 'pensando…'; o += `<div class="r"><span class="chip" style="background:${Q.color}"></span>${esc(Q.name)} <span style="color:var(--muted)">${s}</span>${O.acc[i] ? `<button class="primary" style="margin-left:auto" data-a="deal" data-q="${i}">Cerrar trato</button>` : ''}</div>`; });
     o += `<button class="ghost" style="width:100%;margin-top:8px" data-a="canceloffer">Retirar oferta</button></div>`;
   }
+  if (G.opts.openHands) o += `<div class="sec"><h3>Qué tiene cada uno</h3>${G.players.map((Q, i) => i === p ? '' : `<div class="pl"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}</span><span class="st" style="font-size:14px">${RES.map((r) => RINFO[r].e + (Q.res ? Q.res[r] : '?')).join(' ')}</span></div>`).join('')}</div>`;
   if (!myTurn) return o + `<div class="sec"><div class="note" style="margin:0">Puedes comerciar con el banco y proponer tratos en tu turno, después de tirar. Cuando otro proponga algo, te aparecerá aquí.</div></div>`;
   const bk = U.bank;
   o += `<div class="sec"><h3>Banco y puertos</h3><b>Das</b><div class="picker">${RES.map((r) => { const k = rate(G, p, r); return `<button class="${bk.give === r ? 'on' : ''}" data-a="bgive" data-r="${r}" ${P.res[r] >= k ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span>${k}:1</button>`; }).join('')}</div>
@@ -231,7 +232,7 @@ function tradeTab() {
 }
 function infoTab() {
   const G = U.G;
-  return `<div class="sec"><h3>Jugadores · meta ${G.opts.target}</h3>${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">🃏${Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}${G.opts.ships ? ' 🏝️' + Object.values(G.islandClaim || {}).filter((x) => x === i).length : ''}</span><span class="vp">${Q.vp}</span></div>`).join('')}</div>
+  return `<div class="sec"><h3>Jugadores · meta ${G.opts.target}</h3>${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">${G.opts.openHands && Q.res ? RES.map((r) => RINFO[r].e + Q.res[r]).join(' ') + ' ·' : '🃏' + Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}${G.opts.ships ? ' 🏝️' + Object.values(G.islandClaim || {}).filter((x) => x === i).length : ''}</span><span class="vp">${Q.vp}</span></div>`).join('')}</div>
     <div class="sec"><h3>Banco</h3><div class="row" style="font-weight:600">${RES.map((r) => `<span>${RINFO[r].e} ${G.bank[r]}</span>`).join('')}</div></div>
     <div class="sec"><h3>Registro</h3><div class="log">${G.log.map((l) => `<div>${l}</div>`).join('')}</div></div>
     <button class="ghost" style="width:100%" data-a="leavegame">Salir</button>`;
@@ -247,7 +248,9 @@ function modalHTML() {
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
     const need = Math.floor(RES.reduce((s, r) => s + P.res[r], 0) / 2), sum = RES.reduce((s, r) => s + (U.disc[r] || 0), 0);
-    return box(`<h2>🦹 Ha salido un 7</h2><p>Tienes más de 7 cartas: devuelve ${need}.</p>${counter(U.disc, 'disc', P.res)}<button class="primary big" data-a="discard" ${sum === need ? '' : 'disabled'}>Descartar ${sum}/${need}</button>`);
+    return box(`<h2>🦹 Ha salido un 7</h2><p>Tienes ${RES.reduce((s, r) => s + P.res[r], 0)} cartas: elige ${need} para devolver.</p>
+      <div class="hand" style="margin-bottom:8px">${RES.map((r) => `<div class="rc ${P.res[r] - (U.disc[r] || 0) ? '' : 'zero'}" style="background:${RINFO[r].c}"><span class="e">${RINFO[r].e}</span><span class="n">${P.res[r] - (U.disc[r] || 0)}</span><span class="t">te quedan</span></div>`).join('')}</div>
+      <b>Devuelves</b>${counter(U.disc, 'disc', P.res, P.res)}<button class="primary big" data-a="discard" ${sum === need ? '' : 'disabled'}>Descartar ${sum}/${need}</button>`);
   }
   if (G.phase === 'steal' && G.turn === me) return box(`<h2>¿A quién robas?</h2><p>Te llevas una carta al azar.</p><div class="row">${G.stealCands.map((q) => `<button data-a="steal" data-q="${q}"><span class="chip" style="background:${G.players[q].color}"></span> ${esc(G.players[q].name)} (${G.players[q].n})</button>`).join('')}</div>`);
   if (U.modal && U.modal.t === 'plenty') {

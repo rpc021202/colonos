@@ -10,7 +10,7 @@ const SAVE = 'colonos-host-v1';
 const LOCAL = new URLSearchParams(location.search).has('local');
 const board = new Board3D($('#scene'));
 
-let cfg = { players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic' };
+let cfg = { players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
 let screen = 'start'; // start | config | lobby | game
 let room = null, code = null, G = null, staticB = null;
 let lobby = []; // {token,name,color,online}
@@ -49,10 +49,11 @@ function tokenToPid(token) { return lobby.findIndex((p) => p.token === token); }
 let previewKey = '';
 function preview() {
   const N = hexCountFor(cfg.players, cfg.density);
-  const k = N + '-' + cfg.fog + '-' + cfg.mode;
+  const k = N + '-' + cfg.mode + '-' + cfg.islands;
   if (k === previewKey) return;
   previewKey = k;
-  board.setBoard(genBoard(N, { ships: cfg.mode === 'ships' }), { fog: false });
+  const mainN = hexCountFor(cfg.players, 'war');
+  board.setBoard(genBoard(cfg.mode === 'ships' ? Math.max(N, mainN + 6) : N, { ships: cfg.mode === 'ships', mainN, islands: cfg.islands }), { fog: false });
   board.spin(true);
 }
 
@@ -82,8 +83,12 @@ function render() {
       <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${hexCountFor(cfg.players, d.k)}</span><b>${d.n}</b><span>${d.note} · ${d.d} por jugador</span></button>`).join('')}</div>
       <div class="note">El original son 19 hexágonos para 4 (4,75 por jugador): por debajo de eso no bajamos. Si al final os unís más o menos, se mantiene el espacio por jugador.</div>
       <label class="lbl">Modo de juego</label>${seg('mode', [['classic', '🏝️ Clásico'], ['ships', '⛵ Barcos e islas']])}
-      ${cfg.mode === 'ships' ? `<div class="note">Empezáis en la isla principal; el resto del archipiélago está bajo la niebla. Los barcos (🌲+🐑) salen de tus poblados de costa y avanzan 1 tramo gratis por turno. Descubrir tierra da un recurso y la primera colonia en cada isla nueva, +1 punto. Hay cartas de Pirata.</div>` : `<label class="lbl">Mapa</label>${seg('fog', [[false, '🗺️ Visible'], [true, '🌫️ A ciegas']])}
-      <div class="note">${cfg.fog ? 'Todo empieza cubierto de niebla: cada poblado o camino despeja los hexágonos que toca.' : 'Se ve todo el mapa desde el principio, como el original.'}</div>`}
+      ${cfg.mode === 'ships' ? `<div class="note">La isla principal tiene el tamaño del tablero original y todo el espacio extra se reparte en islas. Los barcos (🌲+🐑) salen de tus poblados de costa y avanzan 1 tramo gratis por turno. Descubrir tierra da un recurso y la primera colonia en cada isla nueva, +1 punto. Hay cartas de Pirata.</div>
+      <label class="lbl">Islas</label>${seg('islands', [['small', '🏝️ Muchas y pequeñas'], ['big', '🏔️ Pocas y grandes']])}` : ''}
+      <label class="lbl">Mapa</label>${seg('fog', [[false, '🗺️ Visible'], [true, '🌫️ A ciegas']])}
+      <div class="note">${cfg.fog ? (cfg.mode === 'ships' ? 'Solo se ve la isla principal: el resto del mar está bajo las nubes y hay que explorarlo.' : 'Todo empieza cubierto de niebla: cada poblado o camino despeja los hexágonos que toca.') : 'Se ve todo el mapa desde el principio.'}</div>
+      <label class="lbl">Recursos de los jugadores</label>${seg('openHands', [[false, '🙈 Ocultos'], [true, '👀 A la vista']])}
+      <div class="note">${cfg.openHands ? 'Todos ven qué recursos tiene cada uno (en la tele y en los móviles). Las cartas de desarrollo siguen siendo secretas.' : 'Cada uno solo ve sus cartas, como en el juego de mesa.'}</div>
       <label class="lbl">Puntos para ganar</label>${seg('target', [[8, '8'], [10, '10'], [12, '12'], [13, '13'], [14, '14']])}
       ${cfg.players > 4 ? `<label class="lbl">Con más de 4</label>${seg('sbp', [[true, '🔨 Construcción extra'], [false, 'Sin ella']])}<div class="note">Al acabar cada turno, el resto puede construir (sin comerciar) para no esperar tanto.</div>` : ''}
       <button class="primary big" data-a="create" style="margin-top:20px">Crear sala</button>
@@ -101,7 +106,7 @@ function render() {
       <label class="lbl">Jugadores (${lobby.length}/8)</label>
       <div class="plist">${lobby.length ? lobby.map((p, i) => `<div class="prow"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${p.bot ? ` <small>🤖 bot</small><button class="ghost" style="margin-left:6px;padding:2px 9px" data-a="rmbot" data-t="${p.token}">✕</button>` : i === 0 ? ' <small>anfitrión</small>' : ''}${p.online || p.bot ? '' : ' <small>desconectado</small>'}</div>`).join('') : '<div class="empty">Esperando a que se una alguien…</div>'}</div>
       <button class="ghost" data-a="addbot" ${lobby.length >= 8 ? 'disabled' : ''}>🤖 Añadir un bot</button>
-      <div class="note">${cfg.mode === 'ships' ? '⛵ Barcos e islas · ' : ''}Tierra: ${hexCountFor(Math.max(2, lobby.length || cfg.players), cfg.density)} hexágonos · ${cfg.fog || cfg.mode === 'ships' ? 'a ciegas' : 'visible'} · ${cfg.target} puntos</div>
+      <div class="note">${cfg.mode === 'ships' ? '⛵ Barcos e islas · ' : ''}Tierra: ${hexCountFor(Math.max(2, lobby.length || cfg.players), cfg.density)} hexágonos · ${cfg.fog ? 'a ciegas' : 'visible'} · ${cfg.target} puntos${cfg.openHands ? ' · recursos a la vista' : ''}</div>
       <button class="primary big" data-a="go" ${lobby.length >= 2 ? '' : 'disabled'}>Empezar partida${lobby.length ? ` (${lobby.length})` : ''}</button>
       <button class="ghost" data-a="cfgback" style="margin-top:8px">Cambiar ajustes</button>
     </div>`;
@@ -128,7 +133,7 @@ function renderHUD() {
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
-    <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">🃏${total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
   </div>
@@ -157,7 +162,7 @@ async function openRoom(c) {
 }
 function send(cid, m) { room && room.send(cid, m); }
 function broadcastLobby() {
-  for (const [cid, tok] of conns) send(cid, { t: 'lobby', you: tokenToPid(tok), players: lobby.map((p) => ({ name: p.name, color: p.color })), cfg: { fog: cfg.fog || cfg.mode === 'ships', ships: cfg.mode === 'ships', target: cfg.target, N: hexCountFor(Math.max(2, lobby.length), cfg.density) } });
+  for (const [cid, tok] of conns) send(cid, { t: 'lobby', you: tokenToPid(tok), players: lobby.map((p) => ({ name: p.name, color: p.color })), cfg: { fog: cfg.fog, ships: cfg.mode === 'ships', target: cfg.target, N: hexCountFor(Math.max(2, lobby.length), cfg.density) } });
   render();
 }
 function broadcastState() {
@@ -258,7 +263,7 @@ setInterval(() => {
 /* ---------- empezar ---------- */
 function startGame() {
   const players = lobby.map((p) => ({ name: p.name, color: p.color }));
-  G = newGame({ players, density: cfg.density, fog: cfg.fog || cfg.mode === 'ships', target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships' });
+  G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands });
   staticB = boardStatic(G);
   screen = 'game';
   board.spin(false);
@@ -297,7 +302,7 @@ document.addEventListener('click', async (e) => {
     case 'back': screen = 'start'; render(); break;
     case 'cfg': {
       let v = d.v; if (v === 'true') v = true; else if (v === 'false') v = false; else if (!isNaN(+v)) v = +v;
-      cfg[d.k] = v; if (d.k === 'mode') cfg.target = v === 'ships' ? 13 : 10; render(); break;
+      cfg[d.k] = v; if (d.k === 'mode') { cfg.target = v === 'ships' ? 13 : 10; cfg.fog = v === 'ships'; } render(); break;
     }
     case 'create': {
       t.disabled = true; t.textContent = 'Creando sala…';

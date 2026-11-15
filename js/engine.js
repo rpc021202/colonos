@@ -74,15 +74,16 @@ function blob(N, jitter = 0.3) {
   return [...sel.values()].map((c) => ({ q: c.q, r: c.r, island: 0 }));
 }
 // archipiélago: isla principal + islas pequeñas separadas por mar, todo rodeado de casillas de mar jugables
-function archipelago(N) {
-  const M = Math.max(12, Math.round(N * 0.58));
+function archipelago(N, mainN, style) {
+  const M = Math.max(12, Math.min(N - 4, mainN || Math.round(N * 0.58)));
   const land = new Map(blob(M, 0.5).map((c) => [ck(c.q, c.r), c]));
   const rMain = Math.max(...[...land.values()].map((c) => hexDist(c.q, c.r)));
   let remaining = N - M, id = 1, tries = 0;
   const touchesOther = (q, r, isl) => D6.some(([a, b]) => { const o = land.get(ck(q + a, r + b)); return o && o.island !== isl; });
   while (remaining > 0 && tries++ < 800) {
-    let size = Math.min(remaining, 2 + rnd(3)); if (remaining - size === 1) size++;
-    const ang = Math.random() * Math.PI * 2, dist = rMain + 2 + Math.random() * 2.2;
+    const big = style === 'big';
+    let size = Math.min(remaining, big ? 4 + rnd(3) : 2 + rnd(2)); if (remaining - size === 1) size++;
+    const ang = Math.random() * Math.PI * 2, dist = rMain + 2 + Math.random() * (big ? 3.2 : 2.6) + (tries > 300 ? 2 : 0);
     const fx = Math.cos(ang) * dist * 1.2, fy = Math.sin(ang) * dist;
     const r0 = Math.round(fy / 1.5 * 1.5 / 1.5), q0 = Math.round(fx / W3 - r0 / 2);
     if (land.has(ck(q0, r0)) || touchesOther(q0, r0, id)) continue;
@@ -94,14 +95,18 @@ function archipelago(N) {
     }
     remaining -= cells.length; id++;
   }
-  // mar navegable: todo lo que esté a 2 casillas o menos de alguna tierra
-  const out = [...land.values()], seaSet = new Set();
-  land.forEach((c) => { for (let dq = -2; dq <= 2; dq++) for (let dr = -2; dr <= 2; dr++) { if (hexDist(dq, dr) > 2) continue; const k = ck(c.q + dq, c.r + dr); if (!land.has(k) && !seaSet.has(k)) { seaSet.add(k); out.push({ q: c.q + dq, r: c.r + dr, island: -1, sea: true }); } } });
+  // mar navegable en forma de gran hexágono regular: así la silueta no delata dónde están las islas
+  const Rmax = Math.max(...[...land.values()].map((c) => hexDist(c.q, c.r))) + 1;
+  const out = [...land.values()];
+  for (let q = -Rmax; q <= Rmax; q++) for (let r = -Rmax; r <= Rmax; r++) {
+    if (hexDist(q, r) > Rmax || land.has(ck(q, r))) continue;
+    out.push({ q, r, island: -1, sea: true });
+  }
   return out;
 }
 export function genBoard(N, opts = {}) {
   const S = 1, W = W3;
-  const cells = opts.ships ? archipelago(N) : blob(N);
+  const cells = opts.ships ? archipelago(N, opts.mainN, opts.islands) : blob(N);
   const hexes = cells.map((c, i) => ({ id: i, q: c.q, r: c.r, x: W * (c.q + c.r / 2), y: 1.5 * c.r, island: c.island, sea: !!c.sea }));
   const key = ck, byKey = {};
   hexes.forEach((h) => (byKey[key(h.q, h.r)] = h));
@@ -240,9 +245,12 @@ function orderCoast(coast, verts) {
 export function newGame(opts) {
   // opts: {players:[{name,color}], density, fog, target, sbp}
   const np = opts.players.length;
-  const N = hexCountFor(np, opts.density);
-  if (opts.ships) opts.fog = true;
-  const board = genBoard(N, { ships: !!opts.ships });
+  let N = hexCountFor(np, opts.density), mainN;
+  if (opts.ships) { // la isla principal es el tablero original; todo el extra se reparte en islas
+    mainN = hexCountFor(np, 'war');
+    N = Math.max(N, mainN + 6);
+  }
+  const board = genBoard(N, { ships: !!opts.ships, mainN, islands: opts.islands || 'small' });
   const f = Math.max(1, np / 4);
   const devCounts = { knight: Math.round(14 * f), vp: 5 + Math.max(0, np - 6), road: Math.round(2 * f), plenty: Math.round(2 * f), mono: Math.round(2 * f) };
   if (opts.ships) devCounts.pirate = Math.round(2 * f);
@@ -261,7 +269,7 @@ export function newGame(opts) {
     dice: null, rollId: 0, playedDev: false, longest: null, army: null, roadLens: Array(np).fill(0), log: [], winner: null,
     sbpQueue: [], discardQueue: [], afterRobber: null, rbLeft: 0, revealed: {}, stealCands: [], offer: null, ev: [],
   };
-  if (opts.ships) { // se ve la isla principal y el mar que la rodea
+  if (opts.ships && opts.fog) { // se ve la isla principal y el mar que la rodea
     board.hexes.forEach((h) => { if (h.island === 0 || (h.sea && h.nb.some((id) => board.hexes[id].island === 0))) G.revealed[h.id] = true; });
   }
   log(G, `Empieza <b>${pn(G, start)}</b>. Colocad los primeros poblados${opts.ships ? ' en la isla principal' : ''}.`);
@@ -753,14 +761,14 @@ export function publicState(G, forP) {
     phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
     robber: B.robber, revealed: G.revealed, longest: G.longest, army: G.army, roadLens: G.roadLens, winner: G.winner,
     playedDev: G.playedDev, rbLeft: G.rbLeft, sbpQueue: G.sbpQueue, discardQueue: G.discardQueue, stealCands: G.stealCands, offer: G.offer,
-    deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships },
+    deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands },
     ships: G.ships || [], islandClaim: G.islandClaim || {},
     buildings: B.verts.filter((v) => v.b).map((v) => [v.id, v.b.p, v.b.t]),
     roads: B.edges.filter((e) => e.road !== null).map((e) => [e.id, e.road]),
     players: G.players.map((P, i) => ({
       name: P.name, color: P.color, n: total(G, i), devN: P.dev.length, knights: P.knights, roads: P.roads, setts: P.setts, cities: P.cities, shipsLeft: P.shipsLeft,
       vp: vp(G, i, G.winner !== null || i === forP),
-      res: i === forP ? P.res : null, dev: i === forP ? P.dev : null,
+      res: i === forP || G.opts.openHands ? P.res : null, dev: i === forP ? P.dev : null,
     })),
   };
 }
