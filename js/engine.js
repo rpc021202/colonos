@@ -450,11 +450,11 @@ function placeSettlement(G, p, v) {
 function placeCity(G, p, v) { G.board.verts[v].b.t = 'c'; G.players[p].setts++; G.players[p].cities--; G.ev.push({ t: 'build', k: 'c', id: v, p }); }
 function placeRoad(G, p, e) { G.board.edges[e].road = p; G.players[p].roads--; G.ev.push({ t: 'build', k: 'r', id: e, p }); reveal(G, p); updateLongest(G); }
 function produce(G, n) {
-  const B = G.board, gains = G.players.map(() => ({})), hexes = [];
+  const B = G.board, gains = G.players.map(() => ({})), hexes = [], fx = [];
   B.hexes.forEach((h) => {
     if (h.num !== n || h.id === B.robber) return;
     hexes.push(h.id);
-    h.verts.forEach((v) => { const b = B.verts[v].b; if (b) gains[b.p][h.res] = (gains[b.p][h.res] || 0) + (b.t === 'c' ? 2 : 1); });
+    h.verts.forEach((v) => { const b = B.verts[v].b; if (b) { const k = b.t === 'c' ? 2 : 1; gains[b.p][h.res] = (gains[b.p][h.res] || 0) + k; fx.push({ h: h.id, v, p: b.p, r: h.res, n: k }); } });
   });
   RES.forEach((r) => {
     const tot = gains.reduce((s, g) => s + (g[r] || 0), 0);
@@ -471,7 +471,7 @@ function produce(G, n) {
     if (parts.length) { any = true; log(G, `<b>${pn(G, i)}</b> recibe ${parts.join(' ')}`); G.ev.push({ t: 'gain', to: i, m: `Recibes ${parts.join(' ')}` }); }
   });
   if (!any) log(G, 'Nadie recibe nada');
-  G.ev.push({ t: 'produce', hexes, flows });
+  G.ev.push({ t: 'produce', hexes, flows, fx: fx.filter((f) => gains[f.p][f.r] > 0) });
 }
 function startSeven(G) {
   const n = G.players.length;
@@ -598,7 +598,7 @@ export function act(G, p, a) {
     case 'roll': {
       if (!isActor || G.phase !== 'roll') return 'Ahora no toca tirar';
       const d1 = 1 + rnd(6), d2 = 1 + rnd(6), s = d1 + d2;
-      G.dice = [d1, d2]; G.rollId++;
+      G.dice = [d1, d2]; G.rollId++; G.rolls = (G.rolls || []).concat(d1 + d2).slice(-200);
       G.ev.push({ t: 'roll', d: [d1, d2], p });
       log(G, `🎲 <b>${pn(G, p)}</b> saca un <b>${s}</b>`);
       if (s === 7) startSeven(G); else { produce(G, s); G.phase = 'main'; }
@@ -758,7 +758,7 @@ export function boardStatic(G) {
 export function publicState(G, forP) {
   const B = G.board;
   return {
-    phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
+    phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rolls: G.rolls || [], rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
     robber: B.robber, revealed: G.revealed, longest: G.longest, army: G.army, roadLens: G.roadLens, winner: G.winner,
     playedDev: G.playedDev, rbLeft: G.rbLeft, sbpQueue: G.sbpQueue, discardQueue: G.discardQueue, stealCands: G.stealCands, offer: G.offer,
     deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands },

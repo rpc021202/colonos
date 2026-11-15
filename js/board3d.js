@@ -15,6 +15,7 @@ import { RINFO } from './engine.js';
 
 const TOP = 0.16; // altura del borde de las casillas (donde van caminos y poblados)
 const rand = (a, b) => a + Math.random() * (b - a);
+const rnd2 = (n) => Math.floor(Math.random() * n);
 const C = (hex) => new THREE.Color(hex);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -65,6 +66,24 @@ const G_ICO0 = new THREE.IcosahedronGeometry(1, 0);
 const G_DOD = new THREE.DodecahedronGeometry(1, 0);
 const G_SPH = new THREE.SphereGeometry(1, 10, 8);
 const prism = (() => { const s = new THREE.Shape(); s.moveTo(-0.5, 0); s.lineTo(0.5, 0); s.lineTo(0, 1); s.lineTo(-0.5, 0); const g = new THREE.ExtrudeGeometry(s, { depth: 1, bevelEnabled: false }); g.translate(0, 0, -0.5); return g; })();
+const FOAM_GEO = new THREE.RingGeometry(1.02, 1.16, 6, 1);
+function sheepMesh() {
+  const g = new THREE.Group(), wool = new THREE.MeshStandardMaterial({ color: '#f6f3ea', roughness: 0.95, flatShading: true }), dark = new THREE.MeshStandardMaterial({ color: '#2b2622', roughness: 0.8 });
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), wool); body.scale.set(0.075, 0.058, 0.058); body.position.y = 0.07; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.035), dark); head.position.set(0.075, 0.08, 0); g.add(head); g.userData.head = head;
+  [[-0.04, -0.025], [-0.04, 0.025], [0.04, -0.025], [0.04, 0.025]].forEach(([x, z]) => { const l = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.04, 0.012), dark); l.position.set(x, 0.02, z); g.add(l); });
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  g.children[1].userData.isHead = true;
+  return g;
+}
+function birdMesh() {
+  const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: '#f2f2f2', side: THREE.DoubleSide, roughness: 0.9 });
+  const wing = new THREE.BufferGeometry(); wing.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, -0.03, 0, 0.09, 0.03, 0, 0.02], 3)); wing.computeVertexNormals();
+  const l = new THREE.Mesh(wing, m), r = new THREE.Mesh(wing, m); r.scale.z = -1; g.add(l, r); g.userData.wings = [l, r];
+  const b = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.06, 5), m); b.rotation.z = -Math.PI / 2; g.add(b);
+  return g;
+}
+const SMOKE_GEO = new THREE.IcosahedronGeometry(1, 1);
 const TOKEN_GEO = new THREE.CylinderGeometry(0.26, 0.27, 0.05, 40);
 const TOKEN_MAT = new THREE.MeshStandardMaterial({ color: '#efe2c2', roughness: 0.75 });
 const TOKEN_FACE = new THREE.CircleGeometry(0.25, 40);
@@ -591,6 +610,7 @@ export class Board3D {
     if (this.water2) { this.water2.material.normalMap.offset.set(-time * 0.01, time * 0.014); }
     if (this.fog) this.fog.forEach((s) => { if (s.userData.leaving) return; s.position.y = s.userData.by + Math.sin(time * 0.6 + s.userData.ph) * 0.03; s.position.x = s.userData.bx + Math.sin(time * 0.25 + s.userData.ph) * 0.04; });
     if (this.robber) this.robber.rotation.y = Math.sin(time * 0.8) * 0.4;
+    this.animateLife(dt, time);
     if (this.ships) for (const k in this.ships) { const m = this.ships[k]; m.children[0].position.y = Math.sin(time * 1.6 + +k) * 0.012; m.children[0].rotation.x = Math.sin(time * 1.2 + +k * 2) * 0.05; }
     if (this.tokens && this.tokens.length) { const az = Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z); this.tokens.forEach((t) => (t.rotation.y = az)); }
     if (this.markers) this.markers.children.forEach((m) => { if (m.userData.pulse) { const s = 1 + Math.sin(time * 5) * 0.18; m.scale.setScalar(s * (m.userData.base || 1)); } });
@@ -598,9 +618,52 @@ export class Board3D {
     this.controls.update();
     if (this.composer) this.composer.render(dt); else this.renderer.render(this.scene, this.camera);
   }
+  // vida en el tablero: ovejas, pájaros, espuma, humo de chimeneas y ciclo de día y noche
+  animateLife(dt, time) {
+    const L = this.life; if (!L) return;
+    L.foam.forEach((f) => { f.material.opacity = 0.22 + 0.2 * Math.sin(time * 1.3 + f.userData.ph); const k = 1 + 0.025 * Math.sin(time * 1.3 + f.userData.ph); f.scale.set(k, k, 1); });
+    L.sheep.forEach((sh) => {
+      const u = sh.userData; u.graze += dt;
+      const walking = Math.sin(u.graze * 0.35) > 0.2;
+      if (walking) { u.a += u.sp * dt * 3; const x = Math.cos(u.a) * u.r, z = Math.sin(u.a) * u.r; sh.position.set(x, u.T.h(x, z), z); sh.rotation.y = -u.a - (u.sp > 0 ? Math.PI / 2 : -Math.PI / 2); }
+      const head = sh.children[1]; head.position.y = walking ? 0.08 : 0.05 + Math.abs(Math.sin(u.graze * 3)) * 0.01;
+    });
+    L.birds.forEach((fl) => {
+      const u = fl.userData; u.a += u.sp * dt * 2;
+      fl.position.set(Math.cos(u.a) * u.r, u.h + Math.sin(time * 0.5) * 0.15, Math.sin(u.a) * u.r);
+      fl.rotation.y = -u.a + (u.sp > 0 ? Math.PI : 0);
+      fl.children.forEach((b) => { const w = Math.sin(time * 9 + b.userData.ph) * 0.7; b.userData.wings[0].rotation.x = w; b.userData.wings[1].rotation.x = -w; });
+    });
+    // humo: cada edificio suelta bocanadas de vez en cuando
+    if (this.pieces && L.smoke.length < 160) for (const k in this.pieces.v) {
+      const m = this.pieces.v[k]; if (Math.random() > dt * (m.userData.t === 'c' ? 1.6 : 0.9)) continue;
+      const p = new THREE.Mesh(SMOKE_GEO, new THREE.MeshStandardMaterial({ color: '#d8d4cc', transparent: true, opacity: 0.55, roughness: 1, depthWrite: false }));
+      const off = new THREE.Vector3(rand(-0.08, 0.08), m.userData.t === 'c' ? 0.3 : 0.24, rand(-0.06, 0.06));
+      p.position.copy(m.position).add(off); p.scale.setScalar(0.015); p.userData = { life: 0, vx: rand(-0.02, 0.05), vz: rand(-0.02, 0.03) };
+      this.root.add(p); L.smoke.push(p);
+    }
+    L.smoke = L.smoke.filter((p) => {
+      const u = p.userData; u.life += dt;
+      p.position.y += dt * 0.12; p.position.x += u.vx * dt; p.position.z += u.vz * dt;
+      p.scale.setScalar(0.015 + u.life * 0.022); p.material.opacity = Math.max(0, 0.55 * (1 - u.life / 3));
+      if (u.life > 3) { this.root.remove(p); p.material.dispose(); return false; }
+      return true;
+    });
+    // día y noche: un ciclo suave de 8 minutos (nunca llega a oscuro del todo)
+    if (this.hq) {
+      const ph = (time / 480) % 1, l = 0.78 + 0.22 * Math.cos(ph * Math.PI * 2);
+      this.sun.intensity = 2.2 * l; this.sun.color.setRGB(1, 0.86 + 0.1 * l, 0.7 + 0.25 * l);
+      this.sun.position.set(-6 * Math.cos(ph * Math.PI * 2), 11 * (0.6 + 0.4 * l), 6);
+      this.renderer.toneMappingExposure = 0.95 * (0.8 + 0.2 * l);
+    }
+  }
+  worldToScreen(x, y, z) {
+    const v = new THREE.Vector3(x, y, z).project(this.camera), r = this.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
+  }
   clear() {
     this.scene.remove(this.root); this.root = new THREE.Group(); this.scene.add(this.root);
-    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = [];
+    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [] }; this.ships = {};
   }
   setBoard(B, opts = {}) {
     this.clear(); this.B = B; SEED = (opts.seed || B.hexes.length * 7919 + Math.round(B.hexes[0].x * 1000)) | 0;
@@ -646,6 +709,11 @@ export class Board3D {
       const top = new THREE.Mesh(hexTopGeo(h.res === 'ore' ? 16 : 10, T), topMat); top.receiveShadow = true; top.castShadow = true;
       const beach = new THREE.Mesh(G_CYL6, beachMat); beach.position.y = -0.06; beach.scale.set(1.07, 0.12, 1.07); beach.receiveShadow = true;
       land.add(side, top, beach); g.add(land);
+      // espuma de las olas en la orilla
+      const coastal = h.nb.length < 6 || h.nb.some((id) => B.hexes[id].res === 'sea');
+      if (coastal) { const foam = new THREE.Mesh(FOAM_GEO, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4, depthWrite: false })); foam.rotation.x = -Math.PI / 2; foam.rotation.z = Math.PI / 2; foam.position.y = -0.085; foam.userData.ph = Math.random() * 6; land.add(foam); this.life.foam.push(foam); }
+      // ovejas que pastan y se mueven
+      if (h.res === 'sheep') for (let k = 0; k < 2; k++) { const sh = sheepMesh(); const a = Math.random() * 6.28, r = 0.5; sh.position.set(Math.cos(a) * r, T.h(Math.cos(a) * r, Math.sin(a) * r), Math.sin(a) * r); sh.userData = { a, r, sp: rand(0.05, 0.12) * (Math.random() < 0.5 ? -1 : 1), T, graze: Math.random() * 6 }; land.add(sh); this.life.sheep.push(sh); }
       const FL = buildFeatures(h.res, T);
       const feat = new THREE.Group(); feat.add(merged(FL, featMat)); treeMeshes(FL.trees).forEach((im) => feat.add(im));
       vegetation(h.res, T, this.hq).forEach((im) => feat.add(im));
@@ -692,6 +760,13 @@ export class Board3D {
     this.camDist = this.fitDist();
     this.scene.fog.near = this.camDist * 1.4; this.scene.fog.far = this.camDist * 4;
     this.controls.maxDistance = Math.max(ex * 4, this.camDist * 1.6);
+    // dos bandadas de pájaros dando vueltas sobre la isla
+    for (let f = 0; f < 2; f++) {
+      const flock = new THREE.Group(), n = 4 + rnd2(3);
+      for (let i = 0; i < n; i++) { const b = birdMesh(); b.position.set(rand(-0.3, 0.3), rand(-0.1, 0.1), rand(-0.3, 0.3)); b.userData.ph = Math.random() * 6; flock.add(b); }
+      flock.userData = { r: ex * rand(0.35, 0.7), h: rand(1.6, 2.4), sp: rand(0.05, 0.09) * (f ? -1 : 1), a: Math.random() * 6 };
+      this.root.add(flock); this.life.birds.push(flock);
+    }
     this.setView(0, false);
   }
   fitDist() {

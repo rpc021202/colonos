@@ -134,13 +134,45 @@ function renderHUD() {
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
-    <div id="strip">${G.players.map((P, i) => `<div class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
+    ${diceHistHTML()}
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
   </div>
   ${G.winner !== null && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
     ${G.players.map((_, i) => i).sort((a, b) => vp(G, b, true) - vp(G, a, true)).map((i) => `<div class="score"><span class="chip" style="background:${G.players[i].color}"></span>${pn(G, i)}<span>${vp(G, i, true)}</span></div>`).join('')}
     <div class="seg" style="margin-top:18px"><button class="ghost" data-a="closewin">Ver tablero</button><button class="primary" data-a="again">Otra partida</button></div></div></div>` : ''}`;
+}
+
+/* ---------- recursos volando y dados ---------- */
+const EMO = { wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' };
+function flyResources(fx) {
+  if (hudHidden) return;
+  fx.forEach((f, i) => {
+    const hx = staticB.hexes[f.h], V = staticB.verts[f.v];
+    const s0 = board.worldToScreen(hx.x, 0.5, hx.y), s1 = V ? board.worldToScreen(V.x, 0.4, V.y) : s0;
+    const chip = document.querySelector(`.pc[data-p="${f.p}"]`); if (!chip) return;
+    const r = chip.getBoundingClientRect(), ex = r.left + r.width / 2, ey = r.top + r.height / 2;
+    for (let k = 0; k < f.n; k++) {
+      const el = document.createElement('div'); el.className = 'fly'; el.textContent = EMO[f.r]; document.body.appendChild(el);
+      const mx = (s1.x + ex) / 2, my = Math.min(s1.y, ey) - 140;
+      const a = el.animate([
+        { transform: `translate(${s0.x}px,${s0.y}px) scale(.4)`, opacity: 0 },
+        { transform: `translate(${s1.x}px,${s1.y - 30}px) scale(1.25)`, opacity: 1, offset: 0.25 },
+        { transform: `translate(${mx}px,${my}px) scale(1.1)`, opacity: 1, offset: 0.6 },
+        { transform: `translate(${ex}px,${ey}px) scale(.7)`, opacity: 0.9 },
+      ], { duration: 1300, delay: i * 110 + k * 140, easing: 'cubic-bezier(.45,0,.25,1)', fill: 'both' });
+      a.onfinish = () => { el.remove(); const c = document.querySelector(`.pc[data-p="${f.p}"]`); c && c.animate([{ transform: 'translateY(0) scale(1)' }, { transform: 'translateY(-6px) scale(1.08)' }, { transform: 'translateY(0) scale(1)' }], { duration: 260 }); };
+    }
+  });
+}
+function diceHistHTML() {
+  const rolls = (G && G.rolls) || []; if (!rolls.length) return '';
+  const cnt = {}; for (let n = 2; n <= 12; n++) cnt[n] = 0; rolls.forEach((r) => cnt[r]++);
+  const max = Math.max(1, ...Object.values(cnt));
+  return `<div id="dhist"><div class="last">${rolls.slice(-10).map((r, i, a) => `<span class="${r === 7 ? 'seven' : ''} ${i === a.length - 1 ? 'now' : ''}">${r}</span>`).join('')}</div>
+    <div class="bars">${Object.entries(cnt).map(([n, c]) => `<div class="b"><i style="height:${(c / max) * 100}%" class="${+n === 7 ? 'seven' : +n === 6 || +n === 8 ? 'hot' : ''}"></i><small>${n}</small></div>`).join('')}</div>
+    <div class="note" style="margin:2px 0 0;font-size:11px">${rolls.length} tiradas</div></div>`;
 }
 
 /* ---------- red ---------- */
@@ -216,7 +248,7 @@ function afterAct() {
   let rolled = false;
   evs.forEach((e) => {
     if (e.t === 'roll') { rolled = true; board.rollDice(e.d[0], e.d[1]); sound.play('dice'); }
-    else if (e.t === 'produce') setTimeout(() => { board.produce(e.hexes, e.flows); if (e.hexes.length) sound.play('produce'); }, rolled ? 1700 : 0);
+    else if (e.t === 'produce') setTimeout(() => { board.produce(e.hexes, e.flows); if (e.hexes.length) sound.play('produce'); flyResources(e.fx || []); }, rolled ? 1700 : 0);
     else if (e.t === 'build') sound.play(e.k === 'r' ? 'road' : e.k === 'c' ? 'city' : e.k === 'b' ? 'ship' : 'settlement');
     else if (e.t === 'sail') sound.play('sail');
     else if (e.t === 'pirate') { sound.play('pirate'); banner(`🏴‍☠️ ${G.players[e.p].name} asalta los barcos de ${G.players[e.q].name}`); }

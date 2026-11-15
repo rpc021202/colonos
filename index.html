@@ -61,6 +61,18 @@ body{overflow:hidden}
 #banner.show{opacity:1;transform:translate(-50%,0) scale(1)}
 #audio{position:fixed;right:20px;top:118px;display:flex;gap:6px}
 #audio button{background:rgba(251,246,234,.94);padding:6px 10px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+#dhist{position:fixed;left:20px;bottom:42px;background:rgba(251,246,234,.92);border-radius:14px;padding:8px 10px;box-shadow:0 4px 16px rgba(0,0,0,.2);width:230px}
+#dhist .last{display:flex;gap:4px;margin-bottom:6px}
+#dhist .last span{width:19px;height:19px;border-radius:6px;background:#efe4cc;font-size:11px;font-weight:700;display:grid;place-items:center}
+#dhist .last span.seven{background:#2b2118;color:#fff}
+#dhist .last span.now{outline:2px solid var(--accent)}
+#dhist .bars{display:flex;gap:3px;height:46px;align-items:flex-end}
+#dhist .b{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end}
+#dhist .b i{display:block;width:100%;background:#b9a98a;border-radius:3px 3px 0 0;min-height:2px;transition:height .4s}
+#dhist .b i.hot{background:#c62828}
+#dhist .b i.seven{background:#2b2118}
+#dhist .b small{font-size:9px;color:var(--muted);line-height:1.2}
+.fly{position:fixed;left:-16px;top:-16px;font-size:30px;pointer-events:none;z-index:30;filter:drop-shadow(0 3px 4px rgba(0,0,0,.4))}
 #keys{position:fixed;left:20px;bottom:18px;color:rgba(255,255,255,.75);font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
 #win{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,25,35,.45);z-index:20}
 #win .card{padding:30px 34px;min-width:360px;text-align:center}
