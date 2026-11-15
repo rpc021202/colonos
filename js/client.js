@@ -43,7 +43,7 @@ function connect() {
 function onMsg(m) {
   switch (m.t) {
     case 'lobby': U.lobby = m; U.me = m.you; if (U.screen !== 'game') U.screen = 'lobby'; U.msg = ''; render(); break;
-    case 'start': U.B = m.b; U.me = m.you; U.screen = 'game'; U.mode = null; U.sel = null; U.tab = 'hand'; U.needBoard = true; render(); break;
+    case 'start': { const again = U.screen === 'game' && U.B && U.B.hexes.length === m.b.hexes.length; U.B = m.b; U.me = m.you; if (!again) { U.screen = 'game'; U.mode = null; U.sel = null; U.tab = 'hand'; U.needBoard = true; } render(); break; }
     case 'state': {
       U.S = m.s; U.G = mirror(U.B, m.s);
       if (U.sel && !stillTarget()) U.sel = null;

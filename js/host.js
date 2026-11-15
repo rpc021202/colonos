@@ -168,6 +168,7 @@ function freeColor(want, except) {
 }
 function onMsg(cid, m) {
   if (!m || typeof m.t !== 'string') return;
+  if (m.t === 'ping') { send(cid, { t: 'pong' }); return; }
   if (m.t === 'hello') {
     const token = String(m.token || '').slice(0, 40);
     const name = String(m.name || '').trim().slice(0, 16) || 'Jugador';

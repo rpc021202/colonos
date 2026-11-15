@@ -82,39 +82,50 @@ function joinLocal(code, h) {
   };
 }
 function joinPeer(code, h) {
-  let peer = null, conn = null, closed = false, tries = 0;
+  // Reconexión robusta: si algo falla se descarta todo y se vuelve a empezar desde cero.
+  let peer = null, conn = null, closed = false, tries = 0, lastMsg = Date.now(), rt = null;
   const state = (s) => h.onStatus && h.onStatus(s);
+  function teardown() {
+    try { conn && conn.close(); } catch (e) {}
+    try { peer && peer.destroy(); } catch (e) {}
+    conn = null; peer = null;
+  }
   function connect() {
     if (closed) return;
+    clearTimeout(rt); rt = null;
+    teardown();
     state('connecting');
-    if (!peer || peer.destroyed) {
-      peer = new window.Peer(PEER_OPTS);
-      peer.on('open', open);
-      peer.on('error', (err) => {
-        if (err.type === 'peer-unavailable') { state('notfound'); retry(3000); }
-        else { state('error'); retry(2500); }
-      });
-      peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
-    } else if (peer.open) open();
+    const p = new window.Peer(PEER_OPTS); peer = p;
+    p.on('open', () => {
+      if (peer !== p) return;
+      const c = p.connect(PREFIX + code, { reliable: true, serialization: 'raw' }); conn = c;
+      c.on('open', () => { if (conn !== c) return; tries = 0; lastMsg = Date.now(); state('open'); h.onOpen && h.onOpen(); });
+      c.on('data', (d) => { lastMsg = Date.now(); try { const m = typeof d === 'string' ? JSON.parse(d) : d; if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) { console.warn(e); } });
+      c.on('close', () => { if (conn === c) { state('lost'); retry(800); } });
+      c.on('error', () => { if (conn === c) retry(800); });
+      // si en 20 s no se abre la conexión, reintentamos
+      setTimeout(() => { if (conn === c && !c.open) retry(0); }, 20000);
+    });
+    p.on('error', (err) => { if (peer !== p) return; state(err.type === 'peer-unavailable' ? 'notfound' : 'error'); retry(1500); });
+    p.on('disconnected', () => { if (peer === p && !(conn && conn.open)) retry(1000); });
   }
-  function open() {
-    conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'raw' });
-    const c = conn;
-    c.on('open', () => { tries = 0; state('open'); h.onOpen && h.onOpen(); });
-    c.on('data', (d) => { try { h.onMessage(typeof d === 'string' ? JSON.parse(d) : d); } catch (e) { console.warn(e); } });
-    c.on('close', () => { if (conn === c) { state('lost'); retry(1500); } });
-    c.on('error', () => {});
-  }
-  let rt = null;
   function retry(ms) {
     if (closed || rt) return;
     tries++;
-    rt = setTimeout(() => { rt = null; connect(); }, Math.min(ms * tries, 8000));
+    rt = setTimeout(() => { rt = null; connect(); }, Math.min(ms + 400 * tries, 6000));
   }
+  // latido: si la pantalla deja de responder, reconectamos
+  setInterval(() => {
+    if (closed || !conn || !conn.open) return;
+    try { conn.send(JSON.stringify({ t: 'ping' })); } catch (e) {}
+    if (Date.now() - lastMsg > 15000) { state('lost'); retry(0); }
+  }, 4000);
+  const wake = () => { if (!document.hidden && !closed && (!conn || !conn.open || Date.now() - lastMsg > 6000)) { tries = 0; connect(); } };
+  document.addEventListener('visibilitychange', wake);
+  addEventListener('pageshow', wake); addEventListener('online', wake);
   connect();
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && (!conn || !conn.open)) connect(); });
   return {
-    send: (data) => { if (conn && conn.open) { conn.send(JSON.stringify(data)); return true; } return false; },
-    close: () => { closed = true; try { peer && peer.destroy(); } catch (e) {} },
+    send: (data) => { if (conn && conn.open) { try { conn.send(JSON.stringify(data)); return true; } catch (e) { retry(0); } } return false; },
+    close: () => { closed = true; teardown(); },
   };
 }
