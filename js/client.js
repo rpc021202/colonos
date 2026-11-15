@@ -26,19 +26,28 @@ function token() {
   if (!t) { t = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set(k, t); }
   return t;
 }
-function send(a) { if (!net || !net.send({ t: 'act', a })) toast('Sin conexión con la pantalla'); }
+function send(a) { if (!net || !net.send({ t: 'act', a })) toast('Sin conexión con la pantalla'); else if (U.status !== 'open') toast('Se enviará en cuanto vuelva la conexión'); }
 const cost = (c) => Object.entries(c).map(([r, n]) => RINFO[r].e.repeat(n)).join('');
 
 /* ---------- conexión ---------- */
+// el aviso rojo solo sale si la desconexión dura más de 5 s (al desbloquear el móvil se recupera antes)
+let lostSince = 0, lostTimer = null;
+function lostBanner() {
+  const bad = U.status !== 'open' && U.screen !== 'join';
+  if (!bad) { lostSince = 0; clearTimeout(lostTimer); lostTimer = null; $('#lost') && $('#lost').remove(); return; }
+  if (!lostSince) lostSince = Date.now();
+  if (Date.now() - lostSince > 5000) { if (!$('#lost')) document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando con la pantalla<span class="dots"></span></div>`); }
+  else if (!lostTimer) lostTimer = setTimeout(() => { lostTimer = null; lostBanner(); }, 5200);
+}
 function connect() {
   if (net) net.close();
   U.status = 'connecting'; render();
   store.set('colonos-name', U.name); store.set('colonos-color', U.color); store.set('colonos-lastcode', U.code);
   net = joinRoom(U.code, {
     onOpen: () => { U.status = 'open'; net.send({ t: 'hello', token: token(), name: U.name, color: U.color }); render(); },
-    onStatus: (s) => { if (s !== 'open') { U.status = s; if (s === 'notfound' && U.screen === 'join') U.msg = 'No encuentro esa sala. ¿El código está bien?'; render(); } },
+    onStatus: (s) => { U.status = s === 'open' ? 'open' : s; if (s === 'notfound' && U.screen === 'join') U.msg = 'No encuentro esa sala. ¿El código está bien?'; if (U.screen === 'join' && s !== 'open') render(); else lostBanner(); },
     onMessage: onMsg,
-  });
+  }, token());
 }
 function onMsg(m) {
   switch (m.t) {
@@ -107,8 +116,7 @@ function render() {
     b3.setTargets(curTargets(), U.sel, U.G.players[U.me].color, U.mode === 'ship' || U.mode === 'move' ? 'ship' : 'road');
   } else if (b3) b3.setActive(false);
   $('#modal').innerHTML = modalHTML();
-  if (U.status !== 'open' && U.screen !== 'join') document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando con la pantalla<span class="dots"></span></div>`);
-  else $('#lost') && $('#lost').remove();
+  lostBanner();
 }
 function swatches(taken) {
   return `<div class="sw">${COLORS.map((c) => `<button style="background:${c.c}" class="${U.color === c.c ? 'sel' : ''}" data-a="color" data-c="${c.c}" title="${c.n}" ${taken.includes(c.c) && U.color !== c.c ? 'disabled' : ''}></button>`).join('')}</div>`;

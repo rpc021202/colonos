@@ -1,7 +1,7 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
 import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total } from './engine.js';
 import { Board3D } from './board3d.js';
-import { hostRoom, makeCode } from './net.js';
+import { hostRoom, makeCode, linkParams } from './net.js';
 import { botAction } from './bots.js';
 import { sound } from './audio.js';
 
@@ -33,6 +33,7 @@ function joinURL() {
   u.search = ''; u.hash = '';
   u.searchParams.set('sala', code);
   if (LOCAL) u.searchParams.set('local', '1');
+  for (const k in linkParams) u.searchParams.set(k, linkParams[k]);
   return u.toString();
 }
 function qrSVG(text, cell = 6) {
@@ -153,8 +154,7 @@ async function openRoom(c) {
       const p = lobby.find((x) => x.token === tok);
       if (p && ![...conns.values()].includes(tok)) {
         p.online = false;
-        if (screen === 'lobby') { lobby = lobby.filter((x) => x !== p); broadcastLobby(); }
-        render();
+        if (screen === 'lobby') broadcastLobby(); else render();
       }
     },
     onError: (e) => toast('Problema de conexión: ' + (e.type || e.message || e)),
