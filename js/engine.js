@@ -482,11 +482,12 @@ function startSeven(G) {
   if (G.phase === 'robber') skipRobberIfNoTarget(G);
 }
 function skipRobberIfNoTarget(G) { if (!robberTargets(G).length) { log(G, 'El ladrón no tiene adónde ir'); finishRobber(G); } }
-function finishRobber(G) { G.phase = G.afterRobber || 'main'; G.afterRobber = null; G.stealCands = []; }
-function doSteal(G, q) {
+function finishRobber(G) { G.phase = G.afterRobber || 'main'; G.afterRobber = null; G.stealCands = []; G.knightSteal = false; }
+// con caballero se elige la carta viendo la mano del rival; con un 7, al azar
+function doSteal(G, q, pick) {
   const pool = [];
   RES.forEach((r) => { for (let i = 0; i < G.players[q].res[r]; i++) pool.push(r); });
-  const r = pool[rnd(pool.length)];
+  const r = G.knightSteal && RES.includes(pick) && G.players[q].res[pick] > 0 ? pick : pool[rnd(pool.length)];
   G.players[q].res[r]--; G.players[G.turn].res[r]++;
   log(G, `<b>${pn(G, G.turn)}</b> roba una carta a <b>${pn(G, q)}</b>`);
   G.ev.push({ t: 'gain', to: G.turn, m: `Robas ${RINFO[r].e} ${RINFO[r].n} a ${G.players[q].name}` });
@@ -626,13 +627,13 @@ export function act(G, p, a) {
       log(G, `🦹 El ladrón se mueve a ${RINFO[hx.res].e}${hx.num ? ' ' + hx.num : ''}`);
       const cands = [...new Set(hx.verts.map((v) => G.board.verts[v].b).filter((b) => b && b.p !== p).map((b) => b.p))].filter((q) => total(G, q) > 0);
       if (!cands.length) finishRobber(G);
-      else if (cands.length === 1) doSteal(G, cands[0]);
+      else if (cands.length === 1 && !G.knightSteal) doSteal(G, cands[0]);
       else { G.phase = 'steal'; G.stealCands = cands; }
       return null;
     }
     case 'steal': {
       if (G.phase !== 'steal' || G.turn !== p || !G.stealCands.includes(a.q)) return 'No puedes robar a ese jugador';
-      doSteal(G, a.q); return null;
+      doSteal(G, a.q, a.r); return null;
     }
     case 'buyDev': {
       if (!isActor || !['main', 'sbp'].includes(G.phase)) return 'Ahora no puedes comprar';
@@ -661,7 +662,7 @@ export function act(G, p, a) {
       me.dev.splice(i, 1); G.playedDev = true;
       log(G, `<b>${pn(G, p)}</b> juega ${DEV[d.t].e} ${DEV[d.t].n}`);
       G.ev.push({ t: 'banner', m: `${DEV[d.t].e} ${G.players[p].name} juega ${DEV[d.t].n}` });
-      if (d.t === 'knight') { me.knights++; updateArmy(G); checkWin(G); if (G.winner !== null) return null; G.afterRobber = G.phase; G.phase = 'robber'; skipRobberIfNoTarget(G); }
+      if (d.t === 'knight') { G.knightSteal = true; me.knights++; updateArmy(G); checkWin(G); if (G.winner !== null) return null; G.afterRobber = G.phase; G.phase = 'robber'; skipRobberIfNoTarget(G); }
       else if (d.t === 'road') { G.rbLeft = G.opts.ships ? 2 : Math.min(2, me.roads); if (G.rbLeft > 0 && (anyRoadSpot(G, p) || (G.opts.ships && shipMoves(G, p, true).length))) G.phase = 'roadbuild'; }
       else if (d.t === 'pirate') {
         const q = a.q, P2 = G.players[q], got = [];
@@ -693,15 +694,29 @@ export function act(G, p, a) {
       const give = clean(a.give), want = clean(a.want);
       if (!sumOf(give) || !sumOf(want)) return 'Pon algo que dar y algo que pedir';
       if (!RES.every((r) => me.res[r] >= give[r])) return 'No tienes lo que ofreces';
-      G.offer = { id: (G.offer ? G.offer.id : 0) + 1, from: p, give, want, acc: {}, rej: {} };
-      log(G, `🤝 <b>${pn(G, p)}</b> ofrece ${fmt(give)} por ${fmt(want)}`);
+      const to = Number.isInteger(a.to) && a.to !== p && G.players[a.to] ? a.to : null;
+      G.offer = { id: (G.offer ? G.offer.id : 0) + 1, from: p, to, give, want, acc: {}, rej: {} };
+      log(G, `🤝 <b>${pn(G, p)}</b> ofrece ${fmt(give)} por ${fmt(want)}${to !== null ? ' a <b>' + pn(G, to) + '</b>' : ''}`);
       G.ev.push({ t: 'offer' });
       return null;
     }
     case 'respond': {
       const O = G.offer;
       if (!O || O.from === p || (a.id && a.id !== O.id)) return 'Esa oferta ya no existe';
-      if (a.yes) { if (!RES.every((r) => me.res[r] >= O.want[r])) return 'No tienes lo que te piden'; O.acc[p] = true; delete O.rej[p]; }
+      if (O.to != null && O.to !== p) return 'Esa oferta no es para ti';
+      if (a.yes) {
+        if (!RES.every((r) => me.res[r] >= O.want[r])) return 'No tienes lo que te piden';
+        if (O.to === p) { // oferta directa: al aceptar se cierra el trato
+          const F = G.players[O.from];
+          if (!RES.every((r) => F.res[r] >= O.give[r])) { G.offer = null; return 'Ya no tiene esos recursos'; }
+          RES.forEach((r) => { F.res[r] += O.want[r] - O.give[r]; me.res[r] += O.give[r] - O.want[r]; });
+          log(G, `🤝 <b>${pn(G, O.from)}</b> cambia ${fmt(O.give)} con <b>${pn(G, p)}</b> por ${fmt(O.want)}`);
+          G.ev.push({ t: 'banner', m: `🤝 Trato entre ${F.name} y ${me.name}` });
+          G.ev.push({ t: 'gain', to: O.from, m: `✅ ${me.name} acepta el trato` });
+          G.offer = null; return null;
+        }
+        O.acc[p] = true; delete O.rej[p];
+      }
       else { O.rej[p] = true; delete O.acc[p]; }
       return null;
     }
@@ -761,7 +776,8 @@ export function publicState(G, forP) {
     phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rolls: G.rolls || [], rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
     robber: B.robber, revealed: G.revealed, longest: G.longest, army: G.army, roadLens: G.roadLens, winner: G.winner,
     playedDev: G.playedDev, rbLeft: G.rbLeft, sbpQueue: G.sbpQueue, discardQueue: G.discardQueue, stealCands: G.stealCands, offer: G.offer,
-    deckN: G.deck.length, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands },
+    deckN: G.deck.length, knightSteal: !!G.knightSteal,
+    stealHands: G.phase === 'steal' && G.knightSteal && forP === G.turn ? Object.fromEntries(G.stealCands.map((q) => [q, { ...G.players[q].res }])) : null, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands },
     ships: G.ships || [], islandClaim: G.islandClaim || {},
     buildings: B.verts.filter((v) => v.b).map((v) => [v.id, v.b.p, v.b.t]),
     roads: B.edges.filter((e) => e.road !== null).map((e) => [e.id, e.road]),

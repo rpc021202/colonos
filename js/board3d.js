@@ -613,7 +613,7 @@ export class Board3D {
     this.animateLife(dt, time);
     if (this.ships) for (const k in this.ships) { const m = this.ships[k]; m.children[0].position.y = Math.sin(time * 1.6 + +k) * 0.012; m.children[0].rotation.x = Math.sin(time * 1.2 + +k * 2) * 0.05; }
     if (this.tokens && this.tokens.length) { const az = Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z); this.tokens.forEach((t) => (t.rotation.y = az)); }
-    if (this.markers) this.markers.children.forEach((m) => { if (m.userData.pulse) { const s = 1 + Math.sin(time * 5) * 0.18; m.scale.setScalar(s * (m.userData.base || 1)); } });
+    if (this.markers) this.markers.children.forEach((m) => { if (m.userData.glow) { m.material.opacity = 0.55 + Math.sin(time * 3 + m.userData.glow) * 0.3; return; } if (m.userData.pulse) { const s = 1 + Math.sin(time * 5) * 0.18; m.scale.setScalar(s * (m.userData.base || 1)); } });
     if (this.water && this.water.material.uniforms && this.water.material.uniforms.time) this.water.material.uniforms.time.value += dt * 0.35;
     this.controls.update();
     if (this.composer) this.composer.render(dt); else this.renderer.render(this.scene, this.camera);
@@ -948,8 +948,9 @@ export class Board3D {
   spin(on) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = 0.6; }
 
   /* ---------- interacción (móvil): marcadores donde se puede construir y tocar para elegir ---------- */
-  setTargets(T, sel, color = '#ffffff', kind = 'road') {
+  setTargets(T, sel, color = '#ffffff', kind = 'road', opt = {}) {
     if (this.markers) this.root.remove(this.markers);
+    const shipE = new Set(opt.shipE || []), cityV = new Set(opt.cityV || []);
     this.markers = new THREE.Group(); this.hits = [];
     const B = this.B; if (!B) return;
     const on = (k, id) => sel && sel.k === k && sel.id === id;
@@ -961,17 +962,20 @@ export class Board3D {
       const dot = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), mk(s ? '#c1592b' : color, s)); dot.position.set(V.x, TOP + 0.06, V.y); dot.renderOrder = 6;
       if (!s) { ring.userData.pulse = true; } else { ring.scale.setScalar(1.4); }
       const hit = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), hitMat); hit.position.set(V.x, TOP + 0.05, V.y); hit.userData = { k: 'v', id };
-      if (s) { const ghost = settlementMesh(color); ghost.position.set(V.x, TOP, V.y); ghost.traverse((o) => { if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.75; } }); this.markers.add(ghost); }
+      if (opt.glow && !s) this.markers.add(this.halo(V.x, TOP + 0.1, V.y, cityV.has(id) ? '#ffb347' : '#ffd54a', 1.0));
+      if (s) { const ghost = cityV.has(id) ? cityMesh(color) : settlementMesh(color); ghost.position.set(V.x, TOP, V.y); ghost.traverse((o) => { if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.75; } }); this.markers.add(ghost); }
       this.markers.add(ring, dot, hit); this.hits.push(hit);
     });
     T.e.forEach((id) => {
       const E = B.edges[id], a = B.verts[E.v[0]], b = B.verts[E.v[1]], s = on('e', id);
       const len = Math.hypot(b.x - a.x, b.y - a.y) * 0.62, ang = -Math.atan2(b.y - a.y, b.x - a.x);
-      const seaEdge = E.hexes.every((h) => B.hexes[h].res === 'sea'), ey = kind === 'ship' || seaEdge ? 0.0 : TOP + 0.05;
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, s ? 0.09 : 0.06), mk(kind === 'ship' ? '#bfe9ff' : '#ffffff', s)); bar.position.set((a.x + b.x) / 2, ey, (a.y + b.y) / 2); bar.rotation.y = ang; bar.renderOrder = 5;
+      const isShip = kind === 'ship' || shipE.has(id);
+      const seaEdge = E.hexes.every((h) => B.hexes[h].res === 'sea'), ey = isShip || seaEdge ? 0.0 : TOP + 0.05;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, s ? 0.09 : 0.06), mk(isShip ? '#bfe9ff' : '#ffffff', s));
+      if (opt.glow && !s) for (const k of [0.3, 0.5, 0.7]) this.markers.add(this.halo(a.x + (b.x - a.x) * k, ey + 0.08, a.y + (b.y - a.y) * k, isShip ? '#7fd3ff' : '#ffffff', 0.55)); bar.position.set((a.x + b.x) / 2, ey, (a.y + b.y) / 2); bar.rotation.y = ang; bar.renderOrder = 5;
       if (!s) bar.userData.pulse = true;
       const hit = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, 0.32), hitMat); hit.position.copy(bar.position); hit.rotation.y = ang; hit.userData = { k: 'e', id };
-      if (s) { const ghost = kind === 'ship' ? shipMesh(color) : roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, kind === 'ship' ? -0.06 : TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
+      if (s) { const ghost = isShip ? shipMesh(color) : roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, isShip ? -0.06 : TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
       this.markers.add(bar, hit); this.hits.push(hit);
     });
     T.h.forEach((id) => {
@@ -983,17 +987,28 @@ export class Board3D {
     });
     this.root.add(this.markers);
   }
+  halo(x, y, z, col, sc) {
+    if (!this.glowTex) {
+      const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+      this.glowTex = new THREE.CanvasTexture(c);
+    }
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: col, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    sp.position.set(x, y, z); sp.scale.setScalar(sc); sp.renderOrder = 4; sp.userData.glow = Math.random() * 6; return sp;
+  }
   bindPicking() {
     const el = this.renderer.domElement; let start = null, multi = false;
     el.addEventListener('pointerdown', (e) => { if (!e.isPrimary) { multi = true; return; } multi = false; start = { x: e.clientX, y: e.clientY, t: Date.now() }; });
     el.addEventListener('pointerup', (e) => {
       if (!e.isPrimary || !start || multi) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y), dt = Date.now() - start.t; start = null;
-      if (moved > 10 || dt > 600 || !this.hits.length) return;
+      if (moved > 10 || dt > 600) return;
+      if (!this.hits.length) { if (this.onMiss) this.onMiss(); return; }
       const r = el.getBoundingClientRect(), ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
       const hit = ray.intersectObjects(this.hits, false)[0];
       if (hit && this.onPick) this.onPick({ k: hit.object.userData.k, id: hit.object.userData.id });
+      else if (!hit && this.onMiss) this.onMiss();
     });
   }
 }

@@ -64,7 +64,7 @@ export function botAction(G, p) {
     while (n > 0) { const r = RES.reduce((a, b) => (P.res[a] - (sel[a] || 0) >= P.res[b] - (sel[b] || 0) ? a : b)); sel[r] = (sel[r] || 0) + 1; n--; }
     return { t: 'discard', sel };
   }
-  if (G.offer && G.offer.from !== p && !G.offer.acc[p] && !G.offer.rej[p]) {
+  if (G.offer && G.offer.from !== p && (G.offer.to == null || G.offer.to === p) && !G.offer.acc[p] && !G.offer.rej[p]) {
     const O = G.offer, can = RES.every((r) => P.res[r] >= O.want[r]);
     const useful = RES.some((r) => O.give[r] && P.res[r] < 2);
     return { t: 'respond', yes: can && useful && Math.random() < 0.6, id: O.id };
@@ -79,7 +79,11 @@ export function botAction(G, p) {
     });
     return { t: 'robber', h };
   }
-  if (G.phase === 'steal' && G.turn === p) return { t: 'steal', q: bestBy(G.stealCands, (q) => total(G, q)) };
+  if (G.phase === 'steal' && G.turn === p) {
+    const q = bestBy(G.stealCands, (q) => total(G, q));
+    const r = RES.filter((r) => G.players[q].res[r] > 0).sort((x, y) => P.res[x] - P.res[y])[0]; // con caballero elige la que menos tiene
+    return { t: 'steal', q, r };
+  }
   if (actor(G) !== p) return null;
   if (G.phase === 'setup') {
     const T = targets(G, p, null);
@@ -105,7 +109,7 @@ export function botAction(G, p) {
   if (G.phase === 'main' && G.offer && G.offer.from === p) {
     const q = Object.keys(G.offer.acc)[0];
     if (q !== undefined) return { t: 'confirm', q: +q };
-    const all = G.players.every((_, i) => i === p || G.offer.rej[i]);
+    const all = G.offer.to != null ? !!G.offer.rej[G.offer.to] : G.players.every((_, i) => i === p || G.offer.rej[i]);
     if (all || Date.now() - (G.offer._ts || 0) > 9000) return { t: 'cancelOffer' };
     return null;
   }

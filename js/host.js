@@ -382,4 +382,4 @@ addEventListener('beforeunload', () => { if (G) save(); });
 // fondo inicial: una isla girando
 board.setBoard(genBoard(19), { fog: false }); board.spin(true);
 render();
-window.__host = { get G() { return G; }, get lobby() { return lobby; }, get code() { return code; }, board };
+window.__host = { get G() { return G; }, get lobby() { return lobby; }, get code() { return code; }, board, push: () => broadcastState() };
