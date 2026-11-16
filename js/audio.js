@@ -3,7 +3,9 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 class Sound {
-  constructor() { this.ctx = null; this.musicOn = store.get('colonos-music', true); this.sfxOn = store.get('colonos-sfx', true); this.pluckCache = {}; }
+  constructor() { this.ctx = null; this.kp = 'colonos-'; this.musicOn = store.get('colonos-music', true); this.sfxOn = store.get('colonos-sfx', true); this.pluckCache = {}; }
+  // el móvil guarda sus preferencias aparte de la tele (por defecto: efectos sí, música no)
+  useKeys(kp, music, sfx) { this.kp = kp; this.musicOn = store.get(kp + 'music', music); this.sfxOn = store.get(kp + 'sfx', sfx); }
   // hay que llamarlo desde un clic (los navegadores no dejan sonar sin interacción)
   unlock() {
     if (!this.ctx) {
@@ -22,8 +24,8 @@ class Sound {
   }
   impulse(sec, decay) { const r = this.ctx.sampleRate, len = r * sec, b = this.ctx.createBuffer(2, len, r); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); } return b; }
   noise(sec) { const r = this.ctx.sampleRate, b = this.ctx.createBuffer(1, r * sec, r), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
-  setMusic(on) { this.musicOn = on; store.set('colonos-music', on); if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.3); }
-  setSfx(on) { this.sfxOn = on; store.set('colonos-sfx', on); if (this.sfxBus) this.sfxBus.gain.setTargetAtTime(on ? 0.8 : 0, this.ctx.currentTime, 0.1); }
+  setMusic(on) { this.musicOn = on; store.set(this.kp + 'music', on); if (this.musicBus) this.musicBus.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.3); }
+  setSfx(on) { this.sfxOn = on; store.set(this.kp + 'sfx', on); if (this.sfxBus) this.sfxBus.gain.setTargetAtTime(on ? 0.8 : 0, this.ctx.currentTime, 0.1); }
 
   /* ---------- instrumentos ---------- */
   // cuerda pulsada (Karplus-Strong) con cuerpo de laúd

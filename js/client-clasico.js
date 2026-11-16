@@ -123,7 +123,7 @@ function swatches(taken) {
 }
 function joinHTML() {
   const busy = U.status === 'connecting' && !U.msg;
-  return `<div class="join"><h1>⬡ Colonos</h1><div class="note" style="margin-bottom:8px">Únete a la partida que se ve en la pantalla.</div>
+  return `<div class="join"><h1>⬡ Catán</h1><div class="note" style="margin-bottom:8px">Únete a la partida que se ve en la pantalla.</div>
     <label class="lbl">Código de la sala</label><input class="code" id="code" maxlength="4" value="${esc(U.code)}" autocomplete="off" autocapitalize="characters">
     <label class="lbl">Tu nombre</label><input id="name" maxlength="16" value="${esc(U.name)}" placeholder="¿Cómo te llamas?">
     <label class="lbl">Tu color</label>${swatches([])}

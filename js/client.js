@@ -1,8 +1,11 @@
 // Mando del jugador (móvil): una sola pantalla con el mapa 3D, la mano abajo, los rivales arriba
 // y los menús de construir / comerciar / partida a un lado. Funciona en horizontal y en vertical.
 import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets } from './engine.js';
-import { joinRoom } from './net.js';
+import { joinRoom, unpack } from './net.js';
+import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
+import { sound } from './audio.js';
+sound.useKeys('colonos-phone-', false, true);
 
 const $ = (s) => document.querySelector(s);
 const qs = new URLSearchParams(location.search);
@@ -56,7 +59,37 @@ function connect() {
     onOpen: () => { U.status = 'open'; net.send({ t: 'hello', token: token(), name: U.name, color: U.color }); render(); },
     onStatus: (s) => { U.status = s === 'open' ? 'open' : s; if (s === 'notfound' && U.screen === 'join') U.msg = 'No encuentro esa sala. ¿El código está bien?'; if (U.screen === 'join' && s !== 'open') render(); else lostBanner(); },
     onMessage: onMsg,
+    onHost: hostEvent,
   }, token());
+}
+/* ---------- relevo: si quien lleva la partida desaparece, un móvil la coge ----------
+   Cada móvil espera un poco según su puesto (para que no la cojan dos a la vez) y el primero
+   que sigue en pie la carga desde la copia del servidor. */
+let relay = null, electT = null, wakeLock = null;
+async function keepAwake() { try { if (relay && 'wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', keepAwake);
+function hostEvent(m) {
+  if (m.alive) { if (U.hostGone) { U.hostGone = false; render(); } clearTimeout(electT); electT = null; return; }
+  if (!m.gone || U.screen !== 'game' || !U.S || relay || !net || !net.relay) return;
+  const humans = U.S.players.map((_, i) => i).filter((i) => !/ 🤖$/.test(U.S.players[i].name));
+  const rank = Math.max(0, humans.indexOf(U.me));
+  U.hostGone = true; U.goneAt = Date.now(); render();
+  clearTimeout(electT);
+  electT = setTimeout(takeOver, 2500 + rank * 4500 + Math.random() * 800);
+}
+async function takeOver() {
+  electT = null;
+  if (relay || !U.hostGone || document.hidden) return;
+  // si la partida nos sigue contestando, no se había ido (era un corte momentáneo)
+  if (net.lastIn() > U.goneAt + 500) { U.hostGone = false; render(); return; }
+  const saved = await unpack(await net.saved());
+  if (!U.hostGone || relay) return; // otro se ha adelantado
+  if (!saved || !saved.G || saved.code !== U.code) { toast('No encuentro la copia de la partida'); return; }
+  try {
+    relay = await startRelay(U.code, net.url, saved, () => { relay = null; render(); });
+    toast('🔁 Tu móvil lleva ahora la partida'); keepAwake();
+  } catch (e) { relay = null; }
+  render();
 }
 function onMsg(m) {
   switch (m.t) {
@@ -68,6 +101,7 @@ function onMsg(m) {
       if (U.sel && !optionsFor(U.sel).length) U.sel = null;
       sync3D(); render(); break;
     }
+    case 'fx': playFx(m.l || []); break;
     case 'note': toast(m.m); break;
     case 'err': toast('⚠️ ' + m.m); break;
     case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
@@ -143,6 +177,18 @@ function selPos(sel) {
   requestAnimationFrame(follow);
 })();
 
+/* ---------- dados y sonidos en el móvil ---------- */
+function playFx(list) {
+  let rolled = false;
+  list.forEach((e) => {
+    if (e.t === 'roll') { rolled = true; sound.play('dice'); if (b3 && b3.ready && U.screen === 'game') b3.rollDice(e.d[0], e.d[1]); }
+    else if (e.t === 'produce') setTimeout(() => { if (b3 && b3.ready) b3.produce(e.hexes); if (e.hexes.length) sound.play('produce'); }, rolled ? 1700 : 0);
+    else if (e.t === 'build') sound.play(e.k === 'r' ? 'road' : e.k === 'c' ? 'city' : e.k === 'b' ? 'ship' : 'settlement');
+    else if (e.t === 'turn') { if (!e.setup && e.p === U.me) sound.play('turn'); }
+    else if (['sail', 'pirate', 'robber', 'devbuy', 'trade', 'win'].includes(e.t)) sound.play(e.t === 'devbuy' ? 'devcard' : e.t);
+  });
+}
+
 /* ---------- mapa 3D persistente ---------- */
 const mapHost = document.createElement('div');
 mapHost.style.cssText = 'position:absolute;inset:0';
@@ -174,7 +220,7 @@ function render() {
     if (!$('#mapslot')) { app.className = 'ingame'; app.innerHTML = '<div id="mapslot"></div><div id="ui"></div>'; }
     ensure3D();
     if (mapHost.parentNode !== $('#mapslot')) $('#mapslot').appendChild(mapHost);
-    b3.setActive(true); b3.resize();
+    b3.setActive(!qs.has('no3d')); b3.resize(); // no3d: solo para pruebas
     const O = glow();
     b3.setTargets(O, U.sel, U.G.players[U.me].color, 'road', { glow: true, shipE: O.shipE, cityV: O.cityV });
     const sc = $('.panel .scroll'), keep = sc ? sc.scrollTop : 0;
@@ -195,7 +241,7 @@ function swatches(taken) {
 }
 function joinHTML() {
   const busy = U.status === 'connecting' && !U.msg;
-  return `<div class="join"><h1>⬡ Colonos</h1><div class="note" style="margin-bottom:8px">${EMBED ? 'Partida creada. Pon tu nombre y elige color para jugar desde este móvil.' : 'Únete a la partida con el código que te han pasado.'}</div>
+  return `<div class="join"><h1>⬡ Catán</h1><div class="note" style="margin-bottom:8px">${EMBED ? 'Partida creada. Pon tu nombre y elige color para jugar desde este móvil.' : 'Únete a la partida con el código que te han pasado.'}</div>
     <label class="lbl">Código de la sala</label><input class="code" id="code" maxlength="4" value="${esc(U.code)}" autocomplete="off" autocapitalize="characters">
     <label class="lbl">Tu nombre</label><input id="name" maxlength="16" value="${esc(U.name)}" placeholder="¿Cómo te llamas?">
     <label class="lbl">Tu color</label>${swatches([])}
@@ -223,6 +269,7 @@ function lobbyHTML() {
     <button class="ghost big" data-a="leave">Salir de la sala</button></div>`;
 }
 function phaseLine(G) {
+  if (U.hostGone) return '⏳ Recuperando la partida…';
   if (G.winner !== null) return `🏆 ¡${esc(G.players[G.winner].name)} gana!`;
   const me = U.me, a = actor(G), mine = a === me;
   if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco' }[U.mode];
@@ -341,6 +388,8 @@ function menuPanel() {
     <div class="note">Meta: ${G.opts.target} puntos · Banco: ${RES.map((r) => `${RINFO[r].e}${G.bank[r]}`).join(' ')}</div>
     <div class="row" style="margin:8px 0"><button data-a="zfit">⤢ Centrar mapa</button>${EMBED ? (G.winner !== null ? '<button class="primary" data-a="selfagain">Otra partida</button>' : '') : '<button data-a="leavegame" class="ghost">Salir</button>'}</div>
     ${EMBED ? `<div class="note">Sala <b>${esc(U.code)}</b> · ${navigator.share ? '<a href="#" data-a="sharelink">compartir enlace</a>' : '<a href="#" data-a="copylink">copiar enlace</a>'} (por si alguien se reconecta desde otro móvil)</div>` : ''}
+    <div class="row" style="margin:0 0 8px"><button data-a="sfx">${sound.sfxOn ? '🔊 Efectos sí' : '🔈 Efectos no'}</button><button data-a="music">${sound.musicOn ? '🎵 Música sí' : '🔇 Música no'}</button></div>
+    ${relay ? '<div class="note">🔁 Este móvil lleva ahora la partida: si puedes, no cierres la página.</div>' : ''}
     <div class="lb">Registro</div><div class="log">${G.log.map((l) => `<div>${l}</div>`).join('')}</div>
     ${EMBED ? '' : `<div class="note"><a href="jugar-clasico.html${location.search}">Usar el mando clásico</a></div>`}</div>`;
 }
@@ -391,6 +440,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'code') { U.code = e.target.value.toUpperCase().replace(/[^A-Z]/g, ''); e.target.value = U.code; }
 });
 document.addEventListener('click', (e) => {
+  sound.unlock(); // los navegadores solo dejan sonar después de tocar la pantalla
   const t = e.target.closest('[data-a]'); if (!t || t.disabled) return;
   const d = t.dataset, G = U.G;
   switch (d.a) {
@@ -454,8 +504,10 @@ document.addEventListener('click', (e) => {
     case 'rmbot': post('rmbot', { i: +d.i }); break;
     case 'selfgo': post('go'); break;
     case 'selfagain': U.winSeen = false; post('again'); break;
-    case 'sharelink': e.preventDefault(); navigator.share({ title: 'Colonos', text: `¡Únete a mi partida de Colonos! Código ${U.code}`, url: friendURL() }).catch(() => {}); break;
+    case 'sharelink': e.preventDefault(); navigator.share({ title: 'Catán', text: `¡Únete a mi partida de Catán! Código ${U.code}`, url: friendURL() }).catch(() => {}); break;
     case 'copylink': e.preventDefault(); navigator.clipboard.writeText(friendURL()).then(() => toast('Enlace copiado'), () => toast(friendURL())); break;
+    case 'sfx': sound.unlock(); sound.setSfx(!sound.sfxOn); render(); break;
+    case 'music': sound.unlock(); sound.setMusic(!sound.musicOn); render(); break;
     case 'zfit': b3 && b3.setView(0, true); U.panel = null; render(); break;
   }
 });
@@ -464,4 +516,4 @@ addEventListener('resize', () => { if (U.screen === 'game') render(); });
 // entrar directamente si ya estábamos en esta sala
 if (U.code && U.name && (EMBED || store.get('colonos-token-' + U.code, null))) connect();
 render();
-window.__client = U; window.__send = send; window.__b3 = () => b3; window.__opts = optionsFor;
+window.__client = U; window.__send = send; window.__relayOn = () => !!relay; window.__b3 = () => b3; window.__opts = optionsFor;

@@ -76,6 +76,23 @@ function sheepMesh() {
   g.children[1].userData.isHead = true;
   return g;
 }
+// aldeanos: muñequitos del color del jugador que van a trabajar a las casillas junto a sus poblados
+const SKIN = new THREE.MeshStandardMaterial({ color: '#f1c9a0', roughness: 0.8 }), DARK = new THREE.MeshStandardMaterial({ color: '#3a2c22', roughness: 0.9 });
+const G_BODY = new THREE.CylinderGeometry(0.016, 0.026, 0.05, 8), G_HEAD = new THREE.SphereGeometry(0.017, 10, 8), G_LEG = new THREE.BoxGeometry(0.01, 0.026, 0.01), G_HAT = new THREE.ConeGeometry(0.02, 0.022, 8), G_LOAD = new THREE.BoxGeometry(0.03, 0.022, 0.022);
+const LOAD_COL = { wood: '#7a4b28', brick: '#b5532c', sheep: '#f3efe4', wheat: '#e2b53b', ore: '#8d939a' };
+const walkerMats = {};
+function walkerMesh(color, res) {
+  const m = walkerMats[color] || (walkerMats[color] = new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(G_BODY, m); body.position.y = 0.05; g.add(body);
+  const head = new THREE.Mesh(G_HEAD, SKIN); head.position.y = 0.09; g.add(head);
+  const hat = new THREE.Mesh(G_HAT, m); hat.position.y = 0.108; g.add(hat);
+  const l1 = new THREE.Mesh(G_LEG, DARK), l2 = new THREE.Mesh(G_LEG, DARK); l1.position.set(0.008, 0.013, 0); l2.position.set(-0.008, 0.013, 0); g.add(l1, l2);
+  const load = new THREE.Mesh(G_LOAD, new THREE.MeshStandardMaterial({ color: LOAD_COL[res] || '#9a8a70', roughness: 0.9 })); load.position.set(0, 0.075, -0.026); load.visible = false; g.add(load);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  g.scale.setScalar(1.9);
+  return g;
+}
 function birdMesh() {
   const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: '#f2f2f2', side: THREE.DoubleSide, roughness: 0.9 });
   const wing = new THREE.BufferGeometry(); wing.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, -0.03, 0, 0.09, 0.03, 0, 0.02], 3)); wing.computeVertexNormals();
@@ -621,6 +638,7 @@ export class Board3D {
   // vida en el tablero: ovejas, pájaros, espuma, humo de chimeneas y ciclo de día y noche
   animateLife(dt, time) {
     const L = this.life; if (!L) return;
+    if (L.walkers) this.animateWalkers(dt, time);
     L.foam.forEach((f) => { f.material.opacity = 0.22 + 0.2 * Math.sin(time * 1.3 + f.userData.ph); const k = 1 + 0.025 * Math.sin(time * 1.3 + f.userData.ph); f.scale.set(k, k, 1); });
     L.sheep.forEach((sh) => {
       const u = sh.userData; u.graze += dt;
@@ -663,7 +681,7 @@ export class Board3D {
   }
   clear() {
     this.scene.remove(this.root); this.root = new THREE.Group(); this.scene.add(this.root);
-    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [] }; this.ships = {};
+    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [], walkers: {} }; this.ships = {};
   }
   setBoard(B, opts = {}) {
     this.clear(); this.B = B; SEED = (opts.seed || B.hexes.length * 7919 + Math.round(B.hexes[0].x * 1000)) | 0;
@@ -753,7 +771,7 @@ export class Board3D {
     this.placeRobber(B.robber !== undefined ? B.robber : (opts.robber || 0), false);
     this.dice = [0, 1].map(() => {
       const mats = [1, 6, 2, 5, 3, 4].map((n) => new THREE.MeshStandardMaterial({ map: dieFaceTex(n), roughness: 0.35 }));
-      const d = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mats); d.castShadow = true; d.visible = false; this.root.add(d); return d;
+      const ds = this.mobile ? 0.48 : 0.3, d = new THREE.Mesh(new THREE.BoxGeometry(ds, ds, ds), mats); d.castShadow = true; d.visible = false; this.root.add(d); return d;
     });
     if (opts.fog) this.buildFog(opts.revealed || {});
     const sc = this.sun.shadow.camera; sc.left = -ex; sc.right = ex; sc.top = ex; sc.bottom = -ex; sc.far = 60; sc.updateProjectionMatrix();
@@ -881,8 +899,59 @@ export class Board3D {
     });
     for (const k in this.pieces.v) if (!seenV.has(+k)) { this.root.remove(this.pieces.v[k]); delete this.pieces.v[k]; }
     for (const k in this.pieces.e) if (!seenE.has(+k)) { this.root.remove(this.pieces.e[k]); delete this.pieces.e[k]; }
+    this.syncWalkers(s, colors);
     if (s.robber !== this.robberHex) this.placeRobber(s.robber, !!this.ready);
     const rt = this.tiles[s.robber]; this.robber.visible = !(rt && rt.hidden);
+  }
+  syncWalkers(s, colors) {
+    const B = this.B, W = this.life.walkers, want = new Set(), cap = this.mobile ? 40 : 70;
+    let n = 0;
+    s.buildings.forEach(([v, p, t]) => {
+      const V = B.verts[v];
+      V.hexes.forEach((hid) => {
+        const tile = this.tiles[hid], H = B.hexes[hid];
+        if (!tile || tile.sea || H.res === 'desert' || H.res === 'sea') return;
+        for (let k = 0; k < (t === 'c' ? 2 : 1); k++) {
+          if (n >= cap) return;
+          const key = v + '-' + hid + '-' + k; want.add(key); n++;
+          if (W[key]) { if (W[key].userData.p === p) continue; tile.g.remove(W[key]); }
+          const w = walkerMesh(colors[p], H.res);
+          const hx = V.x - H.x, hz = V.y - H.y, base = Math.atan2(hz, hx);
+          const home = { x: hx * 0.8, z: hz * 0.8 };
+          w.position.set(home.x, tile.T.h(home.x, home.z), home.z);
+          w.userData = { p, tile, home, base, st: 'rest', t: Math.random() * 3 + k * 2, to: null, ph: Math.random() * 6 };
+          w.visible = !tile.hidden;
+          tile.g.add(w); W[key] = w;
+        }
+      });
+    });
+    for (const k in W) if (!want.has(k)) { W[k].userData.tile.g.remove(W[k]); delete W[k]; }
+  }
+  animateWalkers(dt, time) {
+    const W = this.life.walkers;
+    for (const k in W) {
+      const w = W[k], u = w.userData; if (!w.visible && !u.tile.hidden) w.visible = true;
+      u.t -= dt;
+      if (u.st === 'rest' || u.st === 'work') {
+        if (u.st === 'work') { w.rotation.z = Math.sin(time * 7 + u.ph) * 0.12; }
+        if (u.t <= 0) {
+          w.rotation.z = 0;
+          if (u.st === 'rest') { const a = u.base + Math.PI + (Math.random() - 0.5) * 1.6, r = 0.25 + Math.random() * 0.3; u.to = { x: u.home.x + Math.cos(a) * r, z: u.home.z + Math.sin(a) * r }; u.st = 'go'; }
+          else { u.to = { ...u.home }; u.st = 'back'; }
+        }
+        continue;
+      }
+      const dx = u.to.x - w.position.x, dz = u.to.z - w.position.z, d = Math.hypot(dx, dz), sp = 0.07 * dt;
+      if (d < sp) { w.position.x = u.to.x; w.position.z = u.to.z; if (u.st === 'go') { u.st = 'work'; u.t = 2 + Math.random() * 3; } else { u.st = 'rest'; u.t = 1.5 + Math.random() * 3; } }
+      else { w.position.x += (dx / d) * sp; w.position.z += (dz / d) * sp; w.rotation.y = Math.atan2(dx, dz); }
+      w.position.y = u.tile.T.h(w.position.x, w.position.z);
+    }
+    for (const k in W) {
+      const w = W[k], u = w.userData, walking = u.st === 'go' || u.st === 'back', sw = walking ? Math.sin(time * 12 + u.ph) * 0.6 : 0;
+      const kids = w.children; kids[3].rotation.x = sw; kids[4].rotation.x = -sw; kids[5].visible = u.st === 'back' || u.st === 'rest' && u.t > 0 && u.carry;
+      kids[0].position.y = 0.05 + (walking ? Math.abs(Math.sin(time * 12 + u.ph)) * 0.006 : 0);
+      if (u.st === 'back') u.carry = true; else if (u.st === 'go') u.carry = false;
+    }
   }
   drop(m, road) {
     if (!this.ready) return;
@@ -922,14 +991,14 @@ export class Board3D {
   }
   rollDice(d1, d2) {
     const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.4), hit = new THREE.Vector3();
-    ray.setFromCamera(new THREE.Vector2(0.58, -0.45), this.camera);
+    ray.setFromCamera(this.mobile ? new THREE.Vector2(0.05, 0.05) : new THREE.Vector2(0.58, -0.45), this.camera);
     if (!ray.ray.intersectPlane(plane, hit)) hit.set(this.extent * 0.6, 0.4, this.extent * 0.4);
     const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).setY(0).normalize();
     const fwd = new THREE.Vector3().subVectors(this.controls.target, this.camera.position).setY(0).normalize();
     const faceQ = { 1: [0, 0, Math.PI / 2], 6: [0, 0, -Math.PI / 2], 2: [0, 0, 0], 5: [Math.PI, 0, 0], 3: [-Math.PI / 2, 0, 0], 4: [Math.PI / 2, 0, 0] };
     [d1, d2].forEach((val, i) => {
       const die = this.dice[i]; die.visible = true;
-      const end = hit.clone().add(right.clone().multiplyScalar((i - 0.5) * 0.5)).add(fwd.clone().multiplyScalar(i * 0.12)); end.y = 0.4 + 0.15;
+      const big = this.mobile ? 1.6 : 1, end = hit.clone().add(right.clone().multiplyScalar((i - 0.5) * 0.5 * big)).add(fwd.clone().multiplyScalar(i * 0.12)); end.y = 0.4 + 0.15 * big;
       const start = end.clone().add(right.clone().multiplyScalar(-2.6)).add(fwd.clone().multiplyScalar(-1.2)); start.y = 2.6;
       const qEnd = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(...faceQ[val])));
       const axis = new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize(), spins = rand(14, 20);

@@ -36,26 +36,47 @@ function liveness(h) {
   setInterval(() => { const now = Date.now(); for (const [cid, t] of seen) if (now - t > 25000) { seen.delete(cid); h.onClose && h.onClose(cid); } }, 3000);
   return (cid) => { if (!seen.has(cid)) h.onConnect && h.onConnect(cid); seen.set(cid, Date.now()); };
 }
+// Relevo: quien lleva la partida anuncia en /h que está vivo (con su "época", la hora a la que la cogió)
+// y deja en /g la partida guardada. Si su conexión muere, el servidor publica él solo {gone} en /h
+// (testamento MQTT) y otro móvil coge la partida desde /g.
 function hostMqtt(code, h, url) {
   return new Promise((resolve, reject) => {
-    const base = 'colonos/v1/' + code;
-    const c = window.mqtt.connect(url, { clientId: 'colonos-h-' + code + '-' + uid(), clean: true, reconnectPeriod: 1500, connectTimeout: 7000, keepalive: 20 });
-    let ok = false;
+    const base = 'colonos/v1/' + code, epoch = h.epoch || Date.now();
+    const c = window.mqtt.connect(url, { clientId: 'colonos-h-' + code + '-' + uid(), clean: true, reconnectPeriod: 1500, connectTimeout: 7000, keepalive: 12,
+      will: { topic: base + '/h', payload: JSON.stringify({ epoch, gone: true }), qos: 1, retain: true } });
+    let ok = false, replaced = false, closed = false, aliveT = null, lastG = null;
     const seen = liveness(h);
     const fail = setTimeout(() => { if (!ok) { try { c.end(true); } catch (e) {} reject(new Error('timeout')); } }, 8000);
+    const savedWait = [];
+    // se vuelve a anunciar de vez en cuando (por si alguien ha pisado el aviso guardado)
+    const beat = setInterval(() => { if (!replaced && !closed && c.connected) c.publish(base + '/h', JSON.stringify({ epoch, alive: true }), { qos: 1, retain: true }); }, 20000);
     c.on('connect', () => {
       c.subscribe(base + '/u/+', { qos: 1 });
+      // antes de anunciarse, mira si otro ha cogido la partida mientras esta pantalla dormía
+      c.subscribe(base + '/h', { qos: 1 });
+      clearTimeout(aliveT);
+      aliveT = setTimeout(() => { if (!replaced && !closed) c.publish(base + '/h', JSON.stringify({ epoch, alive: true }), { qos: 1, retain: true }); }, 900);
       if (!ok) {
         ok = true; clearTimeout(fail);
         resolve({
-          send: (cid, data) => c.publish(base + '/d/' + cid, JSON.stringify(data), { qos: 1 }),
-          close: () => c.end(true),
+          url, epoch,
+          send: (cid, data) => { if (!replaced) c.publish(base + '/d/' + cid, JSON.stringify(data), { qos: 1 }); },
+          save: (txt) => { lastG = txt; if (!replaced && c.connected) c.publish(base + '/g', txt, { qos: 1, retain: true }); },
+          // la última partida guardada en el servidor (por si otro la ha seguido llevando)
+          saved: () => new Promise((res) => { savedWait.push(res); c.subscribe(base + '/g', { qos: 1 }); setTimeout(() => res(null), 4000); }),
+          // cierre limpio: así el servidor no publica el aviso de "se ha ido"
+          close: () => { closed = true; clearTimeout(aliveT); clearInterval(beat); try { c.end(false); } catch (e) {} },
         });
       }
     });
     c.on('message', (topic, payload) => {
-      const cid = topic.split('/').pop();
+      if (topic === base + '/g') { const txt = payload.toString(); savedWait.splice(0).forEach((r) => r(txt)); c.unsubscribe(base + '/g'); return; }
       let m; try { m = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (topic === base + '/h') {
+        if (m && m.epoch > epoch && !replaced) { replaced = true; clearTimeout(aliveT); clearInterval(beat); h.onReplaced && h.onReplaced(m); }
+        return;
+      }
+      const cid = topic.split('/').pop();
       seen(cid);
       h.onMessage(cid, m);
     });
@@ -109,7 +130,8 @@ export function joinRoom(code, h, token) {
 function joinMqtt(code, h, token, url) {
   const base = 'colonos/v1/' + code, me = (token || uid()).replace(/[^a-z0-9]/gi, '').slice(0, 24) || uid();
   const state = (s) => h.onStatus && h.onStatus(s);
-  let c = null, closed = false, lastIn = Date.now();
+  let c = null, closed = false, lastIn = Date.now(), hostEpoch = 0;
+  const savedWait = [];
   const pending = []; // mensajes enviados sin conexión: se mandan al reconectar
   function start() {
     if (closed) return;
@@ -120,6 +142,7 @@ function joinMqtt(code, h, token, url) {
     c = cl;
     cl.on('connect', () => {
       if (c !== cl) return;
+      cl.subscribe(base + '/h', { qos: 1 });
       cl.subscribe(base + '/d/' + me, { qos: 1 }, () => {
         if (c !== cl) return;
         lastIn = Date.now(); state('open');
@@ -127,7 +150,18 @@ function joinMqtt(code, h, token, url) {
         h.onOpen && h.onOpen();
       });
     });
-    cl.on('message', (topic, payload) => { lastIn = Date.now(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {} });
+    cl.on('message', (topic, payload) => {
+      if (topic === base + '/g') { const txt = payload.toString(); savedWait.splice(0).forEach((r) => r(txt)); cl.unsubscribe(base + '/g'); return; }
+      if (topic === base + '/h') {
+        // cambio de anfitrión: si hay uno nuevo nos presentamos; si el actual se ha ido, avisamos
+        try { const m = JSON.parse(payload.toString()); if (!m || !m.epoch) return;
+          if (m.alive && m.epoch >= hostEpoch) { const nw = hostEpoch && m.epoch > hostEpoch; hostEpoch = m.epoch; if (nw) { h.onOpen && h.onOpen(); } h.onHost && h.onHost(m); }
+          else if (m.gone && m.epoch >= hostEpoch) { hostEpoch = m.epoch; h.onHost && h.onHost(m); }
+        } catch (e) {}
+        return;
+      }
+      lastIn = Date.now(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {}
+    });
     cl.on('reconnect', () => { if (c === cl) state('connecting'); });
     cl.on('offline', () => { if (c === cl) state('lost'); });
     cl.on('close', () => { if (c === cl && !closed) state('lost'); });
@@ -157,7 +191,11 @@ function joinMqtt(code, h, token, url) {
   document.addEventListener('visibilitychange', wake);
   addEventListener('pageshow', wake); addEventListener('online', wake); addEventListener('focus', wake);
   start();
-  return { send, close: () => { closed = true; try { c && c.end(true); } catch (e) {} } };
+  return {
+    send, close: () => { closed = true; try { c && c.end(true); } catch (e) {} },
+    url, relay: true, lastIn: () => lastIn,
+    saved: () => new Promise((res) => { savedWait.push(res); if (c && c.connected) c.subscribe(base + '/g', { qos: 1 }); setTimeout(() => res(null), 5000); }),
+  };
 }
 function joinLocal(code, h) {
   const me = uid(), ch = new BroadcastChannel(PREFIX + code);
@@ -206,4 +244,28 @@ function joinPeer(code, h) {
     send: (data) => { if (conn && conn.open) { try { conn.send(JSON.stringify(data)); return true; } catch (e) { retry(0); } } return false; },
     close: () => { closed = true; teardown(); },
   };
+}
+
+/* ================= RELEVO ================= */
+// otro móvil coge la partida en el mismo servidor de mensajes que usan todos
+export function hostRelay(code, h, url) { return hostMqtt(code, h, url); }
+// la partida guardada va comprimida (las grandes con barcos pasan de 100 KB)
+export async function pack(obj) {
+  const json = JSON.stringify(obj);
+  try {
+    if (!window.CompressionStream) throw 0;
+    const buf = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    let bin = ''; const u8 = new Uint8Array(buf);
+    for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return 'z:' + btoa(bin);
+  } catch (e) { return 'j:' + json; }
+}
+export async function unpack(txt) {
+  if (!txt) return null;
+  try {
+    if (txt.startsWith('j:')) return JSON.parse(txt.slice(2));
+    const bin = atob(txt.slice(2)), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return JSON.parse(await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
+  } catch (e) { return null; }
 }

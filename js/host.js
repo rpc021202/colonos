@@ -1,7 +1,7 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
 import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total } from './engine.js';
 import { Board3D } from './board3d.js';
-import { hostRoom, makeCode, linkParams } from './net.js';
+import { hostRoom, makeCode, linkParams, pack, unpack } from './net.js';
 import { botAction } from './bots.js';
 import { sound } from './audio.js';
 
@@ -41,8 +41,15 @@ function qrSVG(text, cell = 6) {
   try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: cell, margin: 0, scalable: true }); }
   catch (e) { return ''; }
 }
+let remoteT = null, retired = false;
 function save() {
-  try { localStorage.setItem(SAVE, JSON.stringify({ code, cfg, lobby: lobby.map(({ token, name, color }) => ({ token, name, color })), G, t: Date.now() })); } catch (e) {}
+  if (retired) return;
+  try { localStorage.setItem(SAVE, JSON.stringify({ code, cfg, lobby: lobby.map(({ token, name, color, bot }) => ({ token, name, color, bot })), G, t: Date.now() })); } catch (e) {}
+  // copia en el servidor de mensajes para el relevo automático
+  if (G && room && room.save && !retired) {
+    clearTimeout(remoteT);
+    remoteT = setTimeout(async () => { if (G && room && !retired) room.save(await pack({ v: 1, at: Date.now(), code, cfg, lobby: lobby.map(({ token, name, color, bot }) => ({ token, name, color, bot })), G })); }, 300);
+  }
 }
 function loadSave() { try { return JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch (e) { return null; } }
 function tokenToPid(token) { return lobby.findIndex((p) => p.token === token); }
@@ -66,7 +73,7 @@ function render() {
     const s = loadSave();
     const canResume = s && s.code && s.G && s.G.winner === null && Date.now() - (s.t || 0) < 1000 * 60 * 60 * 24 * 3;
     ui.innerHTML = `<div id="start"><div class="card">
-      <h1>⬡ Colonos</h1><div class="sub">${PHONE ? 'Crea la partida y juega desde este móvil, o únete a la de otro.' : 'Esta pantalla será el tablero. Cada jugador se une con su móvil.'}</div>
+      <h1>⬡ Catán</h1><div class="sub">${PHONE ? 'Crea la partida y juega desde este móvil, o únete a la de otro.' : 'Esta pantalla será el tablero. Cada jugador se une con su móvil.'}</div>
       <button class="primary big" data-a="newself">📱 Crear y jugar desde este ${PHONE ? 'móvil' : 'dispositivo'}</button>
       <button class="big ${PHONE ? 'ghost' : 'primary'}" data-a="new">📺 Crear con esta pantalla como tablero</button>
       <button class="big ghost" data-a="demo">👀 Ver una partida de demostración</button>
@@ -181,6 +188,8 @@ function diceHistHTML() {
 async function openRoom(c) {
   code = c;
   room = await hostRoom(code, {
+    epoch: Date.now(),
+    onReplaced,
     onConnect: () => {},
     onMessage: onMsg,
     onClose: (cid) => {
@@ -193,6 +202,24 @@ async function openRoom(c) {
     },
     onError: (e) => toast('Problema de conexión: ' + (e.type || e.message || e)),
   });
+}
+// otro móvil ha cogido la partida mientras esta página dormía
+async function onReplaced() {
+  if (!G) return;
+  if (cfg.self) { // desde el móvil: este sigue jugando como uno más y el otro lleva la partida
+    retired = true; const r = room; room = null; try { r.close(); } catch (e) {}
+    try { localStorage.removeItem(SAVE); } catch (e) {}
+    return;
+  }
+  // la tele o el ordenador vuelven a coger la partida, con lo último que se jugó
+  const saved = await unpack(await room.saved());
+  try { room.close(); } catch (e) {}
+  room = null; conns.clear();
+  if (saved && saved.G) { G = saved.G; G.ev = []; lobby = saved.lobby.map((p) => ({ ...p, online: false })); cfg = { ...cfg, ...saved.cfg }; staticB = boardStatic(G); }
+  try { await openRoom(code); } catch (e) { toast('No se ha podido recuperar la partida'); return; }
+  board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
+  render(); save();
+  toast('Partida recuperada');
 }
 function send(cid, m) { room && room.send(cid, m); }
 function broadcastLobby() {
@@ -263,6 +290,10 @@ function afterAct() {
     else if (e.t === 'sbp') sendTo(e.p, { t: 'yourturn', sbp: true });
     else if (e.t === 'win') { setTimeout(() => banner(`🏆 ¡${G.players[e.p].name} gana!`), 300); sound.play('win'); }
   });
+  // lo que ha pasado, para que cada móvil anime los dados y ponga los sonidos
+  const fx = evs.filter((e) => ['roll', 'produce', 'build', 'sail', 'pirate', 'robber', 'devbuy', 'turn', 'win'].includes(e.t) || (e.t === 'banner' && e.m.startsWith('🤝')))
+    .map((e) => (e.t === 'roll' ? { t: 'roll', d: e.d } : e.t === 'produce' ? { t: 'produce', hexes: e.hexes } : e.t === 'build' ? { t: 'build', k: e.k } : e.t === 'turn' ? { t: 'turn', p: e.p, setup: !!e.setup } : e.t === 'banner' ? { t: 'trade' } : { t: e.t }));
+  if (fx.length) for (const [cid] of conns) send(cid, { t: 'fx', l: fx });
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   broadcastState();
   renderHUD();
@@ -279,7 +310,7 @@ function addBot() {
   lobby.push({ token: 'bot-' + Math.random().toString(36).slice(2, 8), name, color: freeColor(null), bot: true, online: true });
 }
 setInterval(() => {
-  if (!G || screen !== 'game' || G.winner !== null || Date.now() < botWait) return;
+  if (!G || retired || screen !== 'game' || G.winner !== null || Date.now() < botWait) return;
   if (G.offer && !G.offer._ts) G.offer._ts = Date.now();
   for (let p = 0; p < lobby.length; p++) {
     if (!lobby[p] || !lobby[p].bot) continue;
@@ -317,6 +348,10 @@ async function resume() {
   staticB = boardStatic(G);
   try { await openRoom(s.code); }
   catch (e) { err = 'No se ha podido reabrir la sala (puede tardar un minuto en liberarse). Prueba de nuevo.'; G = null; render(); return; }
+  if (room.saved) { // si mientras tanto otro móvil siguió la partida, se continúa desde ahí
+    const sv = await unpack(await room.saved());
+    if (sv && sv.G && sv.at > (s.t || 0)) { G = sv.G; G.ev = []; lobby = sv.lobby.map((p) => ({ ...p, online: false })); staticB = boardStatic(G); }
+  }
   screen = 'game'; board.spin(false); board.ready = false;
   board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed });
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
@@ -333,7 +368,7 @@ async function keepAwake() { try { if ('wakeLock' in navigator && document.visib
 function mountSelf() {
   if (selfFrame) return;
   board.setActive(false); $('#scene').style.display = 'none';
-  { const keep = sound.musicOn; sound.setMusic(false); try { localStorage.setItem('colonos-music', JSON.stringify(keep)); } catch (e) {} } // en el móvil, sin música (la tele la recuerda)
+  sound.musicOn = false; sound.sfxOn = false; if (sound.musicBus) { sound.musicBus.gain.value = 0; sound.sfxBus.gain.value = 0; } // el sonido lo pone el mando
   const u = new URL(joinURL()); u.searchParams.set('embed', '1');
   selfFrame = document.createElement('iframe');
   selfFrame.src = u.toString(); selfFrame.id = 'selfplay'; selfFrame.allow = 'fullscreen; web-share; clipboard-write';
@@ -348,7 +383,7 @@ addEventListener('message', (e) => {
   if (m === 'rmbot' && !G) { const p = lobby[e.data.i]; if (p && p.bot) { lobby.splice(e.data.i, 1); broadcastLobby(); save(); } }
   if (m === 'go' && !G && lobby.length >= 2) startGame();
   if (m === 'again' && G && G.winner !== null) { G = null; staticB = null; screen = 'lobby'; for (const [cid] of conns) send(cid, { t: 'reset' }); broadcastLobby(); save(); }
-  if (m === 'share') navigator.share && navigator.share({ title: 'Colonos', text: `¡Únete a mi partida de Colonos! Código ${code}`, url: joinURL() }).catch(() => {});
+  if (m === 'share') navigator.share && navigator.share({ title: 'Catán', text: `¡Únete a mi partida de Catán! Código ${code}`, url: joinURL() }).catch(() => {});
 });
 
 /* ---------- eventos ---------- */
@@ -389,7 +424,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'exitdemo': demo = false; G = null; screen = 'start'; previewKey = ''; board.setBoard(genBoard(19), { fog: false }); board.spin(true); render(); break;
     case 'copy': try { await navigator.clipboard.writeText(joinURL()); toast('Enlace copiado'); } catch (ex) { toast(joinURL()); } break;
-    case 'share': try { await navigator.share({ title: 'Colonos', text: `¡Únete a mi partida! Código ${code}`, url: joinURL() }); } catch (ex) {} break;
+    case 'share': try { await navigator.share({ title: 'Catán', text: `¡Únete a mi partida! Código ${code}`, url: joinURL() }); } catch (ex) {} break;
     case 'closewin': G._winClosed = true; renderHUD(); break;
     case 'again': {
       if (demo) { G = null; lobby = []; for (let i = 0; i < 4; i++) addBot(); startGame(); break; }
@@ -413,5 +448,6 @@ addEventListener('beforeunload', () => { if (G) save(); });
 
 // fondo inicial: una isla girando
 board.setBoard(genBoard(19), { fog: false }); board.spin(true);
+if (new URLSearchParams(location.search).has('no3d')) { board.setActive(false); board.setActive = () => {}; } // solo para pruebas
 render();
 window.__host = { get G() { return G; }, get lobby() { return lobby; }, get code() { return code; }, board, push: () => broadcastState() };
