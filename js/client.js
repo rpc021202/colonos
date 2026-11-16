@@ -7,6 +7,11 @@ import { Board3D } from './board3d.js';
 const $ = (s) => document.querySelector(s);
 const qs = new URLSearchParams(location.search);
 const LOCAL = qs.has('local');
+// embed: este mando va dentro de la página que lleva la partida (crear y jugar desde el mismo móvil)
+const EMBED = qs.has('embed') && window.parent !== window;
+const post = (m, extra = {}) => { try { window.parent.postMessage({ colonos: m, ...extra }, location.origin); } catch (e) {} };
+function friendURL() { const u = new URL(location.href); u.searchParams.delete('embed'); u.hash = ''; return u.toString(); }
+function qrSVG(text) { try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); } catch (e) { return ''; } }
 // en modo prueba (?local=1) cada pestaña es un jugador distinto
 const ST = () => (LOCAL ? sessionStorage : localStorage);
 const store = { get(k, d) { try { const v = ST().getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { ST().setItem(k, JSON.stringify(v)); } catch (e) {} } };
@@ -190,7 +195,7 @@ function swatches(taken) {
 }
 function joinHTML() {
   const busy = U.status === 'connecting' && !U.msg;
-  return `<div class="join"><h1>⬡ Colonos</h1><div class="note" style="margin-bottom:8px">Únete a la partida que se ve en la pantalla.</div>
+  return `<div class="join"><h1>⬡ Colonos</h1><div class="note" style="margin-bottom:8px">${EMBED ? 'Partida creada. Pon tu nombre y elige color para jugar desde este móvil.' : 'Únete a la partida con el código que te han pasado.'}</div>
     <label class="lbl">Código de la sala</label><input class="code" id="code" maxlength="4" value="${esc(U.code)}" autocomplete="off" autocapitalize="characters">
     <label class="lbl">Tu nombre</label><input id="name" maxlength="16" value="${esc(U.name)}" placeholder="¿Cómo te llamas?">
     <label class="lbl">Tu color</label>${swatches([])}
@@ -199,6 +204,18 @@ function joinHTML() {
 }
 function lobbyHTML() {
   const L = U.lobby || { players: [] }, taken = L.players.filter((_, i) => i !== U.me).map((p) => p.color);
+  if (EMBED) {
+    const url = friendURL();
+    return `<div class="join"><h1>Tu partida</h1><div class="note">Pasa el código o el enlace a tus amigos para que se unan desde su móvil.</div>
+    <div class="share"><div class="qr">${qrSVG(url)}</div><div><div class="note" style="margin:0">Código</div><div class="bigcode">${esc(U.code)}</div>
+      <div class="row" style="margin-top:6px">${navigator.share ? '<button class="primary" data-a="sharelink">📤 Compartir</button>' : ''}<button data-a="copylink">📋 Copiar enlace</button></div></div></div>
+    <label class="lbl">Jugadores (${L.players.length}/8)</label>${L.players.map((p, i) => `<div class="lp"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${i === U.me ? ' <small style="color:var(--muted);margin-left:auto">tú</small>' : / 🤖$/.test(p.name) ? `<button class="ghost" style="margin-left:auto;padding:2px 10px" data-a="rmbot" data-i="${i}">✕</button>` : ''}</div>`).join('')}
+    <button class="ghost" style="width:100%" data-a="addbot" ${L.players.length >= 8 ? 'disabled' : ''}>🤖 Añadir un bot</button>
+    <label class="lbl">Tu color</label>${swatches(taken)}
+    ${L.cfg ? `<div class="note">${L.cfg.ships ? '⛵ Barcos e islas · ' : ''}Mapa de ${L.cfg.N} hexágonos · ${L.cfg.fog ? 'a ciegas' : 'visible'} · ${L.cfg.target} puntos</div>` : ''}
+    <button class="primary big" data-a="selfgo" ${L.players.length >= 2 ? '' : 'disabled'}>Empezar partida (${L.players.length})</button>
+    <div class="note">Este móvil lleva la partida: si lo bloqueas o cierras la página, el juego se queda en pausa para todos hasta que vuelvas.</div></div>`;
+  }
   return `<div class="join"><h1>¡Dentro!</h1><div class="note">Sala <b>${esc(U.code)}</b>. Esperando a que empiece la partida<span class="dots"></span></div>
     <label class="lbl">Jugadores</label>${L.players.map((p, i) => `<div class="lp"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${i === U.me ? ' <small style="color:var(--muted);margin-left:auto">tú</small>' : ''}</div>`).join('')}
     <label class="lbl">Tu color</label>${swatches(taken)}
@@ -266,10 +283,10 @@ function handHTML() {
 function handOpenHTML() {
   const G = U.G, P = G.players[U.me];
   return `<div id="veil" data-a="handclose"></div><div id="fantitle">Tu mano · ${sumRes(P.res)} cartas<span>toca fuera para cerrar</span></div>
-  <div id="fan">${RES.map((r) => `<div class="big ${P.res[r] ? '' : 'zero'}" style="background:${RINFO[r].c}"><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${P.res[r]}</span></div>`).join('')}
+  <div id="fan">${RES.map((r) => `<div class="bc ${P.res[r] ? '' : 'zero'}" style="background:${RINFO[r].c}"><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${P.res[r]}</span></div>`).join('')}
   ${P.dev.length ? '<span class="sp"></span>' : ''}${P.dev.map((d, i) => {
     const can = d.t !== 'vp' && canPlayDev(G, U.me, i), fresh = d.bt >= G.turnNum && d.t !== 'vp';
-    return `<div class="big dev"><span class="e">${DEV[d.t].e}</span><span class="t">${DEV[d.t].n}</span><span class="d">${DEV[d.t].d.split('.')[0]}.</span>${d.t === 'vp' ? '<span class="tag">secreta</span>' : can ? `<button class="play" data-a="dev" data-i="${i}">Jugar</button>` : `<span class="tag">${fresh ? 'recién comprada' : 'ahora no'}</span>`}</div>`;
+    return `<div class="bc dev"><span class="e">${DEV[d.t].e}</span><span class="t">${DEV[d.t].n}</span><span class="d">${DEV[d.t].d.split('.')[0]}.</span>${d.t === 'vp' ? '<span class="tag">secreta</span>' : can ? `<button class="play" data-a="dev" data-i="${i}">Jugar</button>` : `<span class="tag">${fresh ? 'recién comprada' : 'ahora no'}</span>`}</div>`;
   }).join('')}</div>`;
 }
 function buildPanel() {
@@ -322,9 +339,10 @@ function menuPanel() {
   return `<h3>Partida <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">${G.opts.openHands && Q.res ? RES.map((r) => RINFO[r].e + Q.res[r]).join(' ') : '🂠' + Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}${G.opts.ships ? ' 🏝️' + Object.values(G.islandClaim || {}).filter((x) => x === i).length : ''}</span><span class="vp">${i === U.me ? vp(G, i, true) : Q.vp}</span></div>`).join('')}
     <div class="note">Meta: ${G.opts.target} puntos · Banco: ${RES.map((r) => `${RINFO[r].e}${G.bank[r]}`).join(' ')}</div>
-    <div class="row" style="margin:8px 0"><button data-a="zfit">⤢ Centrar mapa</button><button data-a="leavegame" class="ghost">Salir</button></div>
+    <div class="row" style="margin:8px 0"><button data-a="zfit">⤢ Centrar mapa</button>${EMBED ? (G.winner !== null ? '<button class="primary" data-a="selfagain">Otra partida</button>' : '') : '<button data-a="leavegame" class="ghost">Salir</button>'}</div>
+    ${EMBED ? `<div class="note">Sala <b>${esc(U.code)}</b> · ${navigator.share ? '<a href="#" data-a="sharelink">compartir enlace</a>' : '<a href="#" data-a="copylink">copiar enlace</a>'} (por si alguien se reconecta desde otro móvil)</div>` : ''}
     <div class="lb">Registro</div><div class="log">${G.log.map((l) => `<div>${l}</div>`).join('')}</div>
-    <div class="note"><a href="jugar-clasico.html${location.search}">Usar el mando clásico</a></div></div>`;
+    ${EMBED ? '' : `<div class="note"><a href="jugar-clasico.html${location.search}">Usar el mando clásico</a></div>`}</div>`;
 }
 function modalHTML() {
   const G = U.G; if (U.screen !== 'game' || !G) return '';
@@ -332,13 +350,13 @@ function modalHTML() {
   const box = (inner) => `<div class="modal"><div class="box">${inner}</div></div>`;
   if (G.winner !== null && !U.winSeen) {
     const order = G.players.map((_, i) => i).sort((a, b) => G.players[b].vp - G.players[a].vp);
-    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}<button class="primary big" data-a="winok">Cerrar</button>`);
+    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}<div class="row"><button class="${EMBED ? 'ghost' : 'primary'}" data-a="winok">Ver el mapa</button>${EMBED ? '<button class="primary" data-a="selfagain">Otra partida</button>' : ''}</div>`);
   }
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
     const tot = sumRes(P.res), need = Math.floor(tot / 2), sum = sumRes(U.disc);
     return box(`<h2>🦹 Ha salido un 7</h2><p>Tienes ${tot} cartas: toca ${need} para devolverlas.</p>
-      <div class="fanm">${RES.map((r) => `<button class="big ${P.res[r] - (U.disc[r] || 0) ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${P.res[r] - (U.disc[r] || 0) > 0 && sum < need ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">te quedan</span><span class="n">${P.res[r] - (U.disc[r] || 0)}</span>${U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : ''}</button>`).join('')}</div>
+      <div class="fanm">${RES.map((r) => `<button class="bc ${P.res[r] - (U.disc[r] || 0) ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${P.res[r] - (U.disc[r] || 0) > 0 && sum < need ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">te quedan</span><span class="n">${P.res[r] - (U.disc[r] || 0)}</span>${U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : ''}</button>`).join('')}</div>
       <div class="row"><button class="ghost" data-a="discreset" ${sum ? '' : 'disabled'}>Deshacer</button><button class="primary" data-a="discard" ${sum === need ? '' : 'disabled'}>Devolver ${sum}/${need}</button></div>`);
   }
   if (G.phase === 'steal' && G.turn === me) {
@@ -347,7 +365,7 @@ function modalHTML() {
     if (hands && q !== null && q !== undefined && hands[q]) {
       const H = hands[q];
       return box(`<h2>⚔️ Robas a ${esc(G.players[q].name)}</h2><p>Con el caballero ves su mano: toca la carta que te llevas.</p>
-        <div class="fanm">${RES.map((r) => `<button class="big ${H[r] ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="steal" data-q="${q}" data-r="${r}" ${H[r] ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${H[r]}</span></button>`).join('')}</div>
+        <div class="fanm">${RES.map((r) => `<button class="bc ${H[r] ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="steal" data-q="${q}" data-r="${r}" ${H[r] ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${H[r]}</span></button>`).join('')}</div>
         ${cands.length > 1 ? '<button class="ghost wide" data-a="stealback">← Elegir otro jugador</button>' : ''}`);
     }
     return box(`<h2>¿A quién robas?</h2><p>${hands ? 'Con el caballero verás su mano y eliges la carta.' : 'Te llevas una carta al azar.'}</p><div class="row">${cands.map((c) => `<button data-a="${hands ? 'stealq' : 'steal'}" data-q="${c}"><span class="chip" style="background:${G.players[c].color}"></span> ${esc(G.players[c].name)} (${G.players[c].n})</button>`).join('')}</div>`);
@@ -432,12 +450,18 @@ document.addEventListener('click', (e) => {
     case 'deal': send({ t: 'confirm', q: +d.q }); break;
     case 'canceloffer': send({ t: 'cancelOffer' }); break;
     case 'winok': U.winSeen = true; render(); break;
+    case 'addbot': post('addbot'); break;
+    case 'rmbot': post('rmbot', { i: +d.i }); break;
+    case 'selfgo': post('go'); break;
+    case 'selfagain': U.winSeen = false; post('again'); break;
+    case 'sharelink': e.preventDefault(); navigator.share({ title: 'Colonos', text: `¡Únete a mi partida de Colonos! Código ${U.code}`, url: friendURL() }).catch(() => {}); break;
+    case 'copylink': e.preventDefault(); navigator.clipboard.writeText(friendURL()).then(() => toast('Enlace copiado'), () => toast(friendURL())); break;
     case 'zfit': b3 && b3.setView(0, true); U.panel = null; render(); break;
   }
 });
 addEventListener('resize', () => { if (U.screen === 'game') render(); });
 
 // entrar directamente si ya estábamos en esta sala
-if (U.code && U.name && store.get('colonos-token-' + U.code, null)) connect();
+if (U.code && U.name && (EMBED || store.get('colonos-token-' + U.code, null))) connect();
 render();
 window.__client = U; window.__send = send; window.__b3 = () => b3; window.__opts = optionsFor;

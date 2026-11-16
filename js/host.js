@@ -10,7 +10,8 @@ const SAVE = 'colonos-host-v1';
 const LOCAL = new URLSearchParams(location.search).has('local');
 const board = new Board3D($('#scene'));
 
-let cfg = { players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
+const PHONE = matchMedia('(pointer:coarse)').matches && Math.min(window.screen.width, window.screen.height) < 700;
+let cfg = { self: false, players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
 let screen = 'start'; // start | config | lobby | game
 let room = null, code = null, G = null, staticB = null;
 let lobby = []; // {token,name,color,online}
@@ -65,11 +66,12 @@ function render() {
     const s = loadSave();
     const canResume = s && s.code && s.G && s.G.winner === null && Date.now() - (s.t || 0) < 1000 * 60 * 60 * 24 * 3;
     ui.innerHTML = `<div id="start"><div class="card">
-      <h1>⬡ Colonos</h1><div class="sub">Esta pantalla será el tablero. Cada jugador se une con su móvil.</div>
-      <button class="primary big" data-a="new">Crear partida</button>
+      <h1>⬡ Colonos</h1><div class="sub">${PHONE ? 'Crea la partida y juega desde este móvil, o únete a la de otro.' : 'Esta pantalla será el tablero. Cada jugador se une con su móvil.'}</div>
+      <button class="primary big" data-a="newself">📱 Crear y jugar desde este ${PHONE ? 'móvil' : 'dispositivo'}</button>
+      <button class="big ${PHONE ? 'ghost' : 'primary'}" data-a="new">📺 Crear con esta pantalla como tablero</button>
       <button class="big ghost" data-a="demo">👀 Ver una partida de demostración</button>
       ${canResume ? `<button class="big ghost" data-a="resume">Reanudar sala ${esc(s.code)} · ${s.G.players.length} jugadores</button>` : ''}
-      <button class="big ghost" data-a="joinhere">Unirme como jugador desde este dispositivo</button>
+      <button class="big ghost" data-a="joinhere">🙋 Unirme a la partida de otro</button>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
     </div></div>`;
     return;
@@ -78,7 +80,7 @@ function render() {
     preview();
     const seg = (key, vals) => `<div class="seg">${vals.map(([v, l, dis]) => `<button class="${cfg[key] === v ? 'sel' : ''}" data-a="cfg" data-k="${key}" data-v="${v}" ${dis ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
     ui.innerHTML = `<div id="config"><div class="card">
-      <h1>Nueva partida</h1><div class="sub">Configura la partida. Después aparecerá el QR para unirse.</div>
+      <h1>Nueva partida</h1><div class="sub">${cfg.self ? 'Juegas desde este dispositivo, que además lleva la partida. Después podrás pasar el código a los demás.' : 'Configura la partida. Después aparecerá el QR para unirse.'}</div>
       <label class="lbl">¿Cuántos vais a jugar?</label>${seg('players', [2, 3, 4, 5, 6, 7, 8].map((n) => [n, n]))}
       <label class="lbl">Tamaño del mapa</label>
       <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${hexCountFor(cfg.players, d.k)}</span><b>${d.n}</b><span>${d.note} · ${d.d} por jugador</span></button>`).join('')}</div>
@@ -320,7 +322,34 @@ async function resume() {
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   board.ready = true; render();
   toast('Sala reabierta: los móviles se reconectan solos');
+  if (cfg.self) mountSelf();
 }
+
+/* ---------- crear y jugar desde el mismo móvil ----------
+   Esta página lleva la partida (sin dibujar el tablero, para ahorrar batería) y encima
+   se abre el mando del jugador, que se conecta a la sala como uno más. */
+let selfFrame = null, wakeLock = null;
+async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+function mountSelf() {
+  if (selfFrame) return;
+  board.setActive(false); $('#scene').style.display = 'none';
+  { const keep = sound.musicOn; sound.setMusic(false); try { localStorage.setItem('colonos-music', JSON.stringify(keep)); } catch (e) {} } // en el móvil, sin música (la tele la recuerda)
+  const u = new URL(joinURL()); u.searchParams.set('embed', '1');
+  selfFrame = document.createElement('iframe');
+  selfFrame.src = u.toString(); selfFrame.id = 'selfplay'; selfFrame.allow = 'fullscreen; web-share; clipboard-write';
+  document.body.appendChild(selfFrame);
+  keepAwake();
+}
+document.addEventListener('visibilitychange', () => { if (selfFrame && document.visibilityState === 'visible') keepAwake(); if (G) save(); });
+addEventListener('message', (e) => {
+  if (!selfFrame || e.source !== selfFrame.contentWindow || !e.data || !e.data.colonos) return;
+  const m = e.data.colonos;
+  if (m === 'addbot' && !G && lobby.length < 8) { addBot(); broadcastLobby(); save(); }
+  if (m === 'rmbot' && !G) { const p = lobby[e.data.i]; if (p && p.bot) { lobby.splice(e.data.i, 1); broadcastLobby(); save(); } }
+  if (m === 'go' && !G && lobby.length >= 2) startGame();
+  if (m === 'again' && G && G.winner !== null) { G = null; staticB = null; screen = 'lobby'; for (const [cid] of conns) send(cid, { t: 'reset' }); broadcastLobby(); save(); }
+  if (m === 'share') navigator.share && navigator.share({ title: 'Colonos', text: `¡Únete a mi partida de Colonos! Código ${code}`, url: joinURL() }).catch(() => {});
+});
 
 /* ---------- eventos ---------- */
 document.addEventListener('click', async (e) => {
@@ -328,7 +357,8 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-a]'); if (!t) return;
   const d = t.dataset;
   switch (d.a) {
-    case 'new': err = ''; screen = 'config'; render(); break;
+    case 'new': err = ''; cfg.self = false; screen = 'config'; render(); break;
+    case 'newself': err = ''; cfg.self = true; screen = 'config'; render(); break;
     case 'resume': err = ''; resume(); break;
     case 'joinhere': location.href = 'jugar.html' + (LOCAL ? '?local=1' : ''); break;
     case 'back': screen = 'start'; render(); break;
@@ -342,7 +372,9 @@ document.addEventListener('click', async (e) => {
         try { await openRoom(makeCode()); break; }
         catch (ex) { if (i === 3) { err = 'No se ha podido crear la sala. Revisa la conexión a internet.'; render(); return; } }
       }
-      err = ''; screen = 'lobby'; render(); save(); break;
+      err = ''; screen = 'lobby'; render(); save();
+      if (cfg.self) mountSelf();
+      break;
     }
     case 'cfgback': screen = 'config'; render(); break;
     case 'go': if (lobby.length >= 2) startGame(); break;
