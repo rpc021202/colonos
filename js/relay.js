@@ -26,15 +26,16 @@ export async function startRelay(code, url, saved, onStop) {
   };
   function after() {
     const evs = G.ev; G.ev = [];
+    const later = (fn) => (evs.some((e) => e.t === 'roll') ? setTimeout(fn, 1800) : fn()); // se cobra cuando ya se ve el número
     evs.forEach((e) => {
-      if (e.t === 'gain') sendTo(e.to, { t: 'note', m: e.m });
+      if (e.t === 'gain') later(() => sendTo(e.to, { t: 'note', m: e.m }));
       else if (e.t === 'turn') sendTo(e.p, { t: 'yourturn' });
       else if (e.t === 'sbp') sendTo(e.p, { t: 'yourturn', sbp: true });
     });
     const fx = evs.filter((e) => ['roll', 'produce', 'build', 'sail', 'pirate', 'robber', 'devbuy', 'turn', 'win'].includes(e.t) || (e.t === 'banner' && e.m.startsWith('🤝')))
       .map((e) => (e.t === 'roll' ? { t: 'roll', d: e.d } : e.t === 'produce' ? { t: 'produce', hexes: e.hexes } : e.t === 'build' ? { t: 'build', k: e.k } : e.t === 'turn' ? { t: 'turn', p: e.p, setup: !!e.setup } : e.t === 'banner' ? { t: 'trade' } : { t: e.t }));
     if (fx.length) for (const [cid] of conns) send(cid, { t: 'fx', l: fx });
-    broadcast(); persist();
+    later(broadcast); persist();
   }
   function onMessage(cid, m) {
     if (stopped || !m || typeof m.t !== 'string') return;

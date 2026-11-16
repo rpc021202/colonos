@@ -96,12 +96,13 @@ function onMsg(m) {
     case 'lobby': U.lobby = m; U.me = m.you; if (U.screen !== 'game') U.screen = 'lobby'; U.msg = ''; render(); break;
     case 'start': { const again = U.screen === 'game' && U.B && U.B.hexes.length === m.b.hexes.length; U.B = m.b; U.me = m.you; if (!again) { U.screen = 'game'; U.mode = null; U.sel = null; U.panel = null; U.needBoard = true; } render(); break; }
     case 'state': {
+      U.rolling = 0;
       U.S = m.s; U.G = mirror(U.B, m.s);
       autoState();
       if (U.sel && !optionsFor(U.sel).length) U.sel = null;
       sync3D(); render(); break;
     }
-    case 'fx': playFx(m.l || []); break;
+    case 'fx': playFx(m.l || []); if (U.rolling) render(); break;
     case 'note': toast(m.m); break;
     case 'err': toast('⚠️ ' + m.m); break;
     case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
@@ -182,7 +183,7 @@ function selPos(sel) {
 function playFx(list) {
   let rolled = false;
   list.forEach((e) => {
-    if (e.t === 'roll') { rolled = true; sound.play('dice'); if (b3 && b3.ready && U.screen === 'game') b3.rollDice(e.d[0], e.d[1]); }
+    if (e.t === 'roll') { rolled = true; U.rolling = Date.now(); sound.play('dice'); if (b3 && b3.ready && U.screen === 'game') b3.rollDice(e.d[0], e.d[1]); }
     else if (e.t === 'produce') setTimeout(() => { if (b3 && b3.ready) b3.produce(e.hexes); if (e.hexes.length) sound.play('produce'); }, rolled ? 1700 : 0);
     else if (e.t === 'build') sound.play(e.k === 'r' ? 'road' : e.k === 'c' ? 'city' : e.k === 'b' ? 'ship' : 'settlement');
     else if (e.t === 'turn') { if (!e.setup && e.p === U.me) sound.play('turn'); }
@@ -317,6 +318,7 @@ function gameHTML() {
 function actionHTML() {
   const G = U.G, me = U.me;
   if (G.winner !== null) return '';
+  if (U.rolling && Date.now() - U.rolling < 4000) return '';
   if (G.phase === 'roll' && G.turn === me) return `<button id="act" class="roll" data-a="roll">🎲 Tirar dados</button>`;
   if (G.phase === 'main' && G.turn === me) return `<button id="act" data-a="end">Pasar turno ➜</button>`;
   if (G.phase === 'sbp' && actor(G) === me) return `<button id="act" data-a="pass">Terminar ➜</button>`;

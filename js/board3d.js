@@ -770,7 +770,7 @@ export class Board3D {
     this.robber = robberMesh(); this.root.add(this.robber);
     this.placeRobber(B.robber !== undefined ? B.robber : (opts.robber || 0), false);
     this.dice = [0, 1].map(() => {
-      const mats = [1, 6, 2, 5, 3, 4].map((n) => new THREE.MeshStandardMaterial({ map: dieFaceTex(n), roughness: 0.35 }));
+      const mats = [1, 6, 2, 5, 3, 4].map((n) => new THREE.MeshStandardMaterial({ map: dieFaceTex(n), roughness: 0.35, transparent: true }));
       const ds = this.mobile ? 0.48 : 0.3, d = new THREE.Mesh(new THREE.BoxGeometry(ds, ds, ds), mats); d.castShadow = true; d.visible = false; this.root.add(d); return d;
     });
     if (opts.fog) this.buildFog(opts.revealed || {});
@@ -996,6 +996,10 @@ export class Board3D {
     const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).setY(0).normalize();
     const fwd = new THREE.Vector3().subVectors(this.controls.target, this.camera.position).setY(0).normalize();
     const faceQ = { 1: [0, 0, Math.PI / 2], 6: [0, 0, -Math.PI / 2], 2: [0, 0, 0], 5: [Math.PI, 0, 0], 3: [-Math.PI / 2, 0, 0], 4: [Math.PI / 2, 0, 0] };
+    // se ven bien al caer y, 2,5 s después de parar, se quedan semitransparentes para no tapar el mapa
+    const rid = (this.rollId = (this.rollId || 0) + 1);
+    this.dice.forEach((d) => d.material.forEach((m) => (m.opacity = 1)));
+    setTimeout(() => { if (this.rollId === rid) this.tween(0.8, (k) => this.dice.forEach((d) => d.material.forEach((m) => (m.opacity = 1 - 0.55 * k)))); }, 1650 + 2500);
     [d1, d2].forEach((val, i) => {
       const die = this.dice[i]; die.visible = true;
       const big = this.mobile ? 1.6 : 1, end = hit.clone().add(right.clone().multiplyScalar((i - 0.5) * 0.5 * big)).add(fwd.clone().multiplyScalar(i * 0.12)); end.y = 0.4 + 0.15 * big;

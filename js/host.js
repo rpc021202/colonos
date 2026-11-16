@@ -272,11 +272,14 @@ function onMsg(cid, m) {
   }
 }
 function sendTo(pid, m) { const tok = lobby[pid] && lobby[pid].token; for (const [cid, t] of conns) if (t === tok) send(cid, m); }
+const ROLL_WAIT = 1800; // lo que tardan los dados en caer y enseñar el número
 function afterAct() {
   const evs = G.ev; G.ev = [];
-  let rolled = false;
+  const rolled = evs.some((e) => e.t === 'roll');
+  // al tirar: primero caen los dados en todas las pantallas y, cuando sale el número, se cobra
+  const later = (fn) => (rolled ? setTimeout(fn, ROLL_WAIT) : fn());
   evs.forEach((e) => {
-    if (e.t === 'roll') { rolled = true; board.rollDice(e.d[0], e.d[1]); sound.play('dice'); }
+    if (e.t === 'roll') { board.rollDice(e.d[0], e.d[1]); sound.play('dice'); }
     else if (e.t === 'produce') setTimeout(() => { board.produce(e.hexes, e.flows); if (e.hexes.length) sound.play('produce'); flyResources(e.fx || []); }, rolled ? 1700 : 0);
     else if (e.t === 'build') sound.play(e.k === 'r' ? 'road' : e.k === 'c' ? 'city' : e.k === 'b' ? 'ship' : 'settlement');
     else if (e.t === 'sail') sound.play('sail');
@@ -285,7 +288,7 @@ function afterAct() {
     else if (e.t === 'devbuy') sound.play('devcard');
     else if (e.t === 'reveal') setTimeout(() => board.revealHexes(e.hexes), 650);
     else if (e.t === 'banner') { banner(e.m); if (e.m.startsWith('🤝')) sound.play('trade'); }
-    else if (e.t === 'gain') sendTo(e.to, { t: 'note', m: e.m });
+    else if (e.t === 'gain') later(() => sendTo(e.to, { t: 'note', m: e.m }));
     else if (e.t === 'turn') { board.seatView(e.p, G.players.length); sendTo(e.p, { t: 'yourturn' }); if (!e.setup) sound.play('turn'); }
     else if (e.t === 'sbp') sendTo(e.p, { t: 'yourturn', sbp: true });
     else if (e.t === 'win') { setTimeout(() => banner(`🏆 ¡${G.players[e.p].name} gana!`), 300); sound.play('win'); }
@@ -294,9 +297,7 @@ function afterAct() {
   const fx = evs.filter((e) => ['roll', 'produce', 'build', 'sail', 'pirate', 'robber', 'devbuy', 'turn', 'win'].includes(e.t) || (e.t === 'banner' && e.m.startsWith('🤝')))
     .map((e) => (e.t === 'roll' ? { t: 'roll', d: e.d } : e.t === 'produce' ? { t: 'produce', hexes: e.hexes } : e.t === 'build' ? { t: 'build', k: e.k } : e.t === 'turn' ? { t: 'turn', p: e.p, setup: !!e.setup } : e.t === 'banner' ? { t: 'trade' } : { t: e.t }));
   if (fx.length) for (const [cid] of conns) send(cid, { t: 'fx', l: fx });
-  board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
-  broadcastState();
-  renderHUD();
+  later(() => { if (!G) return; board.syncPieces(publicState(G, -1), G.players.map((p) => p.color)); broadcastState(); renderHUD(); });
   save();
 }
 
