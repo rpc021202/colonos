@@ -373,7 +373,22 @@ function mountSelf() {
   selfFrame = document.createElement('iframe');
   selfFrame.src = u.toString(); selfFrame.id = 'selfplay'; selfFrame.allow = 'fullscreen; web-share; clipboard-write';
   document.body.appendChild(selfFrame);
+  selfFrame.addEventListener('load', sendInsets);
   keepAwake();
+}
+// el mando va a pantalla completa: le decimos cuánto ocupan la isla de la cámara y las esquinas
+function sendInsets() {
+  if (!selfFrame) return;
+  let pr = $('#saprobe'); if (!pr) { pr = document.createElement('div'); pr.id = 'saprobe'; document.body.appendChild(pr); }
+  const cs = getComputedStyle(pr), v = (k) => parseFloat(cs[k]) || 0;
+  selfFrame.contentWindow && selfFrame.contentWindow.postMessage({ colonosInsets: { t: v('paddingTop'), r: v('paddingRight'), b: v('paddingBottom'), l: v('paddingLeft') } }, location.origin);
+}
+addEventListener('resize', () => setTimeout(sendInsets, 150));
+addEventListener('orientationchange', () => setTimeout(sendInsets, 400));
+function goHome() { // cierra la sala y vuelve a la pantalla de inicio
+  for (const [cid] of conns) send(cid, { t: 'closed' });
+  try { localStorage.removeItem(SAVE); } catch (e) {}
+  setTimeout(() => { try { room && room.close(); } catch (e) {} location.href = location.pathname + location.search; }, 500);
 }
 document.addEventListener('visibilitychange', () => { if (selfFrame && document.visibilityState === 'visible') keepAwake(); if (G) save(); });
 addEventListener('message', (e) => {
@@ -383,6 +398,8 @@ addEventListener('message', (e) => {
   if (m === 'rmbot' && !G) { const p = lobby[e.data.i]; if (p && p.bot) { lobby.splice(e.data.i, 1); broadcastLobby(); save(); } }
   if (m === 'go' && !G && lobby.length >= 2) startGame();
   if (m === 'again' && G && G.winner !== null) { G = null; staticB = null; screen = 'lobby'; for (const [cid] of conns) send(cid, { t: 'reset' }); broadcastLobby(); save(); }
+  if (m === 'home') goHome();
+  if (m === 'insets') sendInsets();
   if (m === 'share') navigator.share && navigator.share({ title: 'Catán', text: `¡Únete a mi partida de Catán! Código ${code}`, url: joinURL() }).catch(() => {});
 });
 

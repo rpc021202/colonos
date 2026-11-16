@@ -106,6 +106,7 @@ function onMsg(m) {
     case 'err': toast('⚠️ ' + m.m); break;
     case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
     case 'full': U.screen = 'join'; U.msg = m.m; net && net.close(); net = null; render(); break;
+    case 'closed': U.screen = 'join'; U.msg = 'La partida se ha cerrado. ¡Gracias por jugar!'; U.S = null; U.G = null; U.B = null; U.needBoard = true; net && net.close(); net = null; U.status = 'idle'; render(); break;
     case 'reset': U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; U.needBoard = true; render(); break;
   }
 }
@@ -386,7 +387,7 @@ function menuPanel() {
   return `<h3>Partida <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${G.players.map((Q, i) => `<div class="pl ${i === G.turn ? 'cur' : ''}"><span class="chip" style="background:${Q.color}"></span><span class="nm">${esc(Q.name)}${i === U.me ? ' (tú)' : ''}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}</span><span class="st">${G.opts.openHands && Q.res ? RES.map((r) => RINFO[r].e + Q.res[r]).join(' ') : '🂠' + Q.n} 📜${Q.devN} ⚔️${Q.knights} 🛤️${G.roadLens[i]}${G.opts.ships ? ' 🏝️' + Object.values(G.islandClaim || {}).filter((x) => x === i).length : ''}</span><span class="vp">${i === U.me ? vp(G, i, true) : Q.vp}</span></div>`).join('')}
     <div class="note">Meta: ${G.opts.target} puntos · Banco: ${RES.map((r) => `${RINFO[r].e}${G.bank[r]}`).join(' ')}</div>
-    <div class="row" style="margin:8px 0"><button data-a="zfit">⤢ Centrar mapa</button>${EMBED ? (G.winner !== null ? '<button class="primary" data-a="selfagain">Otra partida</button>' : '') : '<button data-a="leavegame" class="ghost">Salir</button>'}</div>
+    <div class="row" style="margin:8px 0"><button data-a="zfit">⤢ Centrar mapa</button>${EMBED ? (G.winner !== null ? '<button class="primary" data-a="selfagain">Otra partida</button>' : '') : ''}<button data-a="gohome" class="ghost">🏠 Inicio</button></div>
     ${EMBED ? `<div class="note">Sala <b>${esc(U.code)}</b> · ${navigator.share ? '<a href="#" data-a="sharelink">compartir enlace</a>' : '<a href="#" data-a="copylink">copiar enlace</a>'} (por si alguien se reconecta desde otro móvil)</div>` : ''}
     <div class="row" style="margin:0 0 8px"><button data-a="sfx">${sound.sfxOn ? '🔊 Efectos sí' : '🔈 Efectos no'}</button><button data-a="music">${sound.musicOn ? '🎵 Música sí' : '🔇 Música no'}</button></div>
     ${relay ? '<div class="note">🔁 Este móvil lleva ahora la partida: si puedes, no cierres la página.</div>' : ''}
@@ -399,7 +400,8 @@ function modalHTML() {
   const box = (inner) => `<div class="modal"><div class="box">${inner}</div></div>`;
   if (G.winner !== null && !U.winSeen) {
     const order = G.players.map((_, i) => i).sort((a, b) => G.players[b].vp - G.players[a].vp);
-    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}<div class="row"><button class="${EMBED ? 'ghost' : 'primary'}" data-a="winok">Ver el mapa</button>${EMBED ? '<button class="primary" data-a="selfagain">Otra partida</button>' : ''}</div>`);
+    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}${EMBED ? '<button class="primary big" data-a="selfagain">🔁 Otra partida con los mismos</button><div class="note" style="text-align:center">Podrán unirse más con el mismo código antes de empezar.</div>' : ''}
+    <div class="row"><button class="ghost" data-a="winok">Ver el mapa</button><button class="${EMBED ? 'ghost' : 'primary'}" data-a="gohome">🏠 Salir al inicio</button></div>`);
   }
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
@@ -500,6 +502,10 @@ document.addEventListener('click', (e) => {
     case 'deal': send({ t: 'confirm', q: +d.q }); break;
     case 'canceloffer': send({ t: 'cancelOffer' }); break;
     case 'winok': U.winSeen = true; render(); break;
+    case 'gohome':
+      if (EMBED) { if (U.G && U.G.winner === null && !confirm('¿Cerrar la partida para todos y volver al inicio?')) break; post('home'); }
+      else { if (U.G && U.G.winner === null && !confirm('¿Salir de la partida?')) break; net && net.close(); location.href = 'index.html' + (LOCAL ? '?local=1' : ''); }
+      break;
     case 'addbot': post('addbot'); break;
     case 'rmbot': post('rmbot', { i: +d.i }); break;
     case 'selfgo': post('go'); break;
@@ -512,6 +518,11 @@ document.addEventListener('click', (e) => {
   }
 });
 addEventListener('resize', () => { if (U.screen === 'game') render(); });
+addEventListener('message', (e) => {
+  const v = e.data && e.data.colonosInsets; if (!v || e.source !== window.parent) return;
+  const st = document.documentElement.style; ['t', 'r', 'b', 'l'].forEach((k) => st.setProperty('--sa' + k, (v[k] || 0) + 'px'));
+});
+if (EMBED) post('insets');
 
 // entrar directamente si ya estábamos en esta sala
 if (U.code && U.name && (EMBED || store.get('colonos-token-' + U.code, null))) connect();
