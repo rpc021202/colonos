@@ -822,7 +822,7 @@ export class Board3D {
       if (revealed[t.h.id]) return;
       t.hidden = true; t.feat.visible = false; if (t.token) t.token.visible = false; t.base.visible = false;
       t.clouds = [];
-      const nC = t.sea ? 3 : 7;
+      const nC = 6; // igual en mar y en tierra: las nubes no delatan dónde hay isla
       for (let i = 0; i < nC; i++) {
         const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: i % 3 ? '#f1f4f7' : '#dfe6ec', roughness: 1, transparent: true, opacity: 0.97 }));
         const a = (i / 6) * Math.PI * 2 + rand(-0.3, 0.3), r = i === 0 ? 0 : rand(0.38, 0.62);

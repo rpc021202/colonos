@@ -1,6 +1,6 @@
 // Mando del jugador (móvil): una sola pantalla con el mapa 3D, la mano abajo, los rivales arriba
 // y los menús de construir / comerciar / partida a un lado. Funciona en horizontal y en vertical.
-import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets } from './engine.js';
+import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets, upgradableShips } from './engine.js';
 import { joinRoom, unpack } from './net.js';
 import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
@@ -141,7 +141,7 @@ function glow() {
   if (want('road') && afford(G, me, COST.road) && P.roads > 0) out.road = targets(G, me, 'road').e;
   if (G.opts.ships && want('ship') && afford(G, me, COST.ship) && P.shipsLeft > 0) out.ship = targets(G, me, 'ship').e;
   if (G.opts.ships && want('move') && G.phase === 'main' && G.turn === me) out.move = shipMoves(G, me, false).map((m) => m.to);
-  if (U.mode === 'upship' && G.phase === 'main' && afford(G, me, COST.shipUp)) out.up = (G.ships || []).filter((x) => x.p === me && (x.lv || 1) < 2).map((x) => x.e);
+  if (U.mode === 'upship' && G.phase === 'main' && afford(G, me, COST.shipUp)) out.up = upgradableShips(G, me).map((x) => x.e);
   add(out.e, out.up);
   add(out.v, out.sett); add(out.v, out.cityV);
   add(out.e, out.road); add(out.e, out.ship); add(out.e, out.move);
@@ -346,12 +346,12 @@ function buildPanel() {
   const G = U.G, me = U.me, P = G.players[me], can = canBuildNow();
   const rows = [['road', '🛤️', 'Camino', COST.road, P.roads > 0 && targets(G, me, 'road').e.length], ['settlement', '🏠', 'Poblado', COST.settlement, P.setts > 0 && targets(G, me, 'settlement').v.length], ['city', '🏰', 'Ciudad', COST.city, P.cities > 0 && targets(G, me, 'city').v.length]];
   if (G.opts.ships) rows.push(['ship', '⛵', 'Barco', COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
-  if (G.opts.ships) rows.push(['upship', '⛵⛵', 'Mejorar barco (2 tramos)', COST.shipUp, G.phase === 'main' && (G.ships || []).some((x) => x.p === me && (x.lv || 1) < 2)]);
+  if (G.opts.ships) rows.push(['upship', '⛵⛵', 'Mejorar barco (2 tramos)', COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
   rows.push(['dev', '🃏', 'Carta de desarrollo', COST.dev, G.deckN > 0]);
   const tag = (ok, room) => (!can ? '' : ok && room ? '<span class="tag y">sí</span>' : ok ? '<span class="tag">sin sitio</span>' : '<span class="tag">falta</span>');
   return `<h3>Construir <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${rows.map(([k, ic, n, c, room]) => { const ok = afford(G, me, c); return `<button class="br ${can && ok && room ? 'ok' : 'no'}" data-a="brow" data-k="${k}" ${can && ok && room ? '' : 'disabled'}><span class="ic">${ic}</span><span class="nm">${n}</span><span class="cost">${costHave(c, P.res)}</span>${tag(ok, room)}</button>`; }).join('')}
-    ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos navegan gratis: 1 tramo por turno, 2 si están mejorados. Toca uno azul en el mapa.</div>' : ''}
+    ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos navegan gratis: 1 tramo por turno, 2 si están mejorados. Toca uno azul en el mapa. Para mejorar un barco tiene que estar atracado en un poblado o ciudad tuya.</div>' : ''}
     <div class="note">${can ? 'Toca una fila para ver solo esos sitios en el mapa.' : 'Solo puedes construir en tu turno, después de tirar.'}<br>Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades${G.opts.ships ? ` · ${P.shipsLeft} barcos` : ''} · ${G.deckN} cartas en el mazo</div>
     <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
 }

@@ -14,7 +14,7 @@ export const RINFO = {
 export const COST = {
   road: { wood: 1, brick: 1 },
   ship: { wood: 1, sheep: 1 },
-  shipUp: { wood: 3, sheep: 1 }, // barco mejorado: navega 2 tramos por turno
+  shipUp: { wood: 3, sheep: 2 }, // barco mejorado: navega 2 tramos por turno (atracado en un poblado o ciudad tuya)
   settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
   city: { wheat: 2, ore: 3 },
   dev: { sheep: 1, wheat: 1, ore: 1 },
@@ -117,7 +117,7 @@ export function genBoard(N, opts = {}) {
   N = landH.length;
 
   // tipos de terreno en la proporción del original
-  const deserts = Math.max(1, Math.round(N / 19)), L = N - deserts;
+  const deserts = 1, L = N - deserts; // un solo desierto (la casa del ladrón), sea cual sea el tamaño
   const weights = { wood: 4, sheep: 4, wheat: 4, brick: 3, ore: 3 };
   const counts = {}, rem = [];
   let used = 0;
@@ -291,6 +291,10 @@ export const edgeLand = (G, e) => G.board.edges[e].hexes.some((h) => !isSea(G, h
 export const edgeSea = (G, e) => !!G.opts.ships && G.board.edges[e].hexes.some((h) => isSea(G, h));
 export const shipAt = (G, e) => (G.ships || []).find((s) => s.e === e);
 const shipTouches = (G, p, v) => (G.ships || []).some((s) => s.p === p && G.board.edges[s.e].v.includes(v));
+// barcos que se pueden mejorar: los tuyos, sin mejorar y atracados junto a un poblado o ciudad tuya
+export function upgradableShips(G, p) {
+  return (G.ships || []).filter((x) => x.p === p && (x.lv || 1) < 2 && G.board.edges[x.e].v.some((v) => { const b = G.board.verts[v].b; return b && b.p === p; }));
+}
 export function canBuildShipE(G, p, e) {
   if (!G.opts.ships || !edgeSea(G, e) || shipAt(G, e)) return false;
   return G.board.edges[e].v.some((v) => { const b = G.board.verts[v].b; return b && b.p === p; });
@@ -605,6 +609,7 @@ export function act(G, p, a) {
       const sh = (G.ships || []).find((x) => x.p === p && (a.id !== undefined ? x.id === a.id : x.e === (a.e | 0)));
       if (!sh) return 'Ese barco no es tuyo';
       if ((sh.lv || 1) >= 2) return 'Ese barco ya está mejorado';
+      if (!upgradableShips(G, p).includes(sh)) return 'El barco tiene que estar atracado en un poblado o ciudad tuya';
       if (!afford(G, p, COST.shipUp)) return 'No tienes recursos suficientes';
       pay(G, p, COST.shipUp); sh.lv = 2;
       G.ev.push({ t: 'build', k: 'b', id: sh.e, p, ship: sh.id });
