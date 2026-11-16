@@ -14,6 +14,7 @@ export const RINFO = {
 export const COST = {
   road: { wood: 1, brick: 1 },
   ship: { wood: 1, sheep: 1 },
+  shipUp: { wood: 3, sheep: 1 }, // barco mejorado: navega 2 tramos por turno
   settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
   city: { wheat: 2, ore: 3 },
   dev: { sheep: 1, wheat: 1, ore: 1 },
@@ -299,7 +300,7 @@ export function shipMoves(G, p, free) {
   const out = [];
   (G.ships || []).forEach((s) => {
     if (s.p !== p) return;
-    if (!free && (s.mv >= G.turnNum || s.bt >= G.turnNum)) return;
+    if (!free && (s.bt >= G.turnNum || (s.mv >= G.turnNum && (s.mvn || 1) >= (s.lv || 1)))) return;
     G.board.edges[s.e].v.forEach((v) => G.board.verts[v].edges.forEach((e) => { if (e !== s.e && edgeSea(G, e) && !shipAt(G, e)) out.push({ id: s.id, to: e }); }));
   });
   return out;
@@ -592,10 +593,22 @@ export function act(G, p, a) {
       const mv = shipMoves(G, p, free).filter((m) => m.to === to && (a.id === undefined || m.id === a.id))[0];
       if (!mv) return 'El barco no puede ir ahí';
       const sh = G.ships.find((x) => x.id === mv.id), from = sh.e;
-      sh.e = to; if (!free) sh.mv = G.turnNum;
+      sh.e = to;
+      if (!free) { sh.mvn = sh.mv >= G.turnNum ? (sh.mvn || 1) + 1 : 1; sh.mv = G.turnNum; }
       G.ev.push({ t: 'sail', id: sh.id, from, to, p });
       reveal(G, p);
       if (free) { G.rbLeft--; if (G.rbLeft <= 0 || !targets(G, p, null).e.length) G.phase = 'main'; }
+      return null;
+    }
+    case 'upgradeShip': {
+      if (!G.opts.ships || !isActor || G.phase !== 'main') return 'Solo en tu turno';
+      const sh = (G.ships || []).find((x) => x.p === p && (a.id !== undefined ? x.id === a.id : x.e === (a.e | 0)));
+      if (!sh) return 'Ese barco no es tuyo';
+      if ((sh.lv || 1) >= 2) return 'Ese barco ya está mejorado';
+      if (!afford(G, p, COST.shipUp)) return 'No tienes recursos suficientes';
+      pay(G, p, COST.shipUp); sh.lv = 2;
+      G.ev.push({ t: 'build', k: 'b', id: sh.e, p, ship: sh.id });
+      log(G, `⛵ <b>${pn(G, p)}</b> mejora un barco: ahora navega 2 tramos por turno`);
       return null;
     }
     case 'roll': {

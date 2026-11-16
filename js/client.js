@@ -124,7 +124,7 @@ const canBuildNow = () => { const G = U.G; return G && G.winner === null && ['ma
 /* ---------- qué brilla en el mapa ---------- */
 // Sin tocar nada se iluminan los sitios que te puedes permitir; desde 🔨 se puede filtrar uno.
 function glow() {
-  const G = U.G, me = U.me, out = { v: [], e: [], h: [], shipE: [], cityV: [], road: [], ship: [], move: [], sett: [] };
+  const G = U.G, me = U.me, out = { v: [], e: [], h: [], shipE: [], cityV: [], road: [], ship: [], move: [], sett: [], up: [] };
   if (!G || G.winner !== null) return out;
   const P = G.players[me], add = (arr, list) => list.forEach((x) => { if (!arr.includes(x)) arr.push(x); });
   if (G.phase === 'setup' || G.phase === 'robber') { const T = targets(G, me, null); out.v = T.v; out.e = T.e; out.h = T.h; out.sett = T.v; out.road = T.e; return out; }
@@ -141,6 +141,8 @@ function glow() {
   if (want('road') && afford(G, me, COST.road) && P.roads > 0) out.road = targets(G, me, 'road').e;
   if (G.opts.ships && want('ship') && afford(G, me, COST.ship) && P.shipsLeft > 0) out.ship = targets(G, me, 'ship').e;
   if (G.opts.ships && want('move') && G.phase === 'main' && G.turn === me) out.move = shipMoves(G, me, false).map((m) => m.to);
+  if (U.mode === 'upship' && G.phase === 'main' && afford(G, me, COST.shipUp)) out.up = (G.ships || []).filter((x) => x.p === me && (x.lv || 1) < 2).map((x) => x.e);
+  add(out.e, out.up);
   add(out.v, out.sett); add(out.v, out.cityV);
   add(out.e, out.road); add(out.e, out.ship); add(out.e, out.move);
   out.shipE = out.e.filter((e) => !out.road.includes(e));
@@ -160,6 +162,7 @@ function optionsFor(sel) {
     if (O.road.includes(sel.id)) o.push({ l: '🛤️ Camino', c: rb || su ? null : COST.road, a: { t: 'road', e: sel.id }, free: rb });
     if (O.ship.includes(sel.id) && canBuildShipE(G, me, sel.id)) o.push({ l: '⛵ Barco', c: COST.ship, a: { t: 'ship', e: sel.id } });
     if (O.move.includes(sel.id)) o.push({ l: '🧭 Navegar aquí', a: { t: 'moveShip', to: sel.id }, free: true });
+    if (O.up.includes(sel.id)) o.push({ l: '⛵ Mejorar barco', c: COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
   }
   return o;
 }
@@ -274,7 +277,7 @@ function phaseLine(G) {
   if (U.hostGone) return '⏳ Recuperando la partida…';
   if (G.winner !== null) return `🏆 ¡${esc(G.players[G.winner].name)} gana!`;
   const me = U.me, a = actor(G), mine = a === me;
-  if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco' }[U.mode];
+  if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco', upship: 'Toca el barco que mejoras' }[U.mode];
   switch (G.phase) {
     case 'setup': return mine ? (G.setupSub === 'settlement' ? 'Toca dónde pones tu poblado' : 'Toca dónde va tu camino') : `${esc(G.players[a].name)} está colocando`;
     case 'roll': return mine ? 'Te toca: tira los dados' : `Turno de ${esc(G.players[a].name)}`;
@@ -343,11 +346,12 @@ function buildPanel() {
   const G = U.G, me = U.me, P = G.players[me], can = canBuildNow();
   const rows = [['road', '🛤️', 'Camino', COST.road, P.roads > 0 && targets(G, me, 'road').e.length], ['settlement', '🏠', 'Poblado', COST.settlement, P.setts > 0 && targets(G, me, 'settlement').v.length], ['city', '🏰', 'Ciudad', COST.city, P.cities > 0 && targets(G, me, 'city').v.length]];
   if (G.opts.ships) rows.push(['ship', '⛵', 'Barco', COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
+  if (G.opts.ships) rows.push(['upship', '⛵⛵', 'Mejorar barco (2 tramos)', COST.shipUp, G.phase === 'main' && (G.ships || []).some((x) => x.p === me && (x.lv || 1) < 2)]);
   rows.push(['dev', '🃏', 'Carta de desarrollo', COST.dev, G.deckN > 0]);
   const tag = (ok, room) => (!can ? '' : ok && room ? '<span class="tag y">sí</span>' : ok ? '<span class="tag">sin sitio</span>' : '<span class="tag">falta</span>');
   return `<h3>Construir <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${rows.map(([k, ic, n, c, room]) => { const ok = afford(G, me, c); return `<button class="br ${can && ok && room ? 'ok' : 'no'}" data-a="brow" data-k="${k}" ${can && ok && room ? '' : 'disabled'}><span class="ic">${ic}</span><span class="nm">${n}</span><span class="cost">${costHave(c, P.res)}</span>${tag(ok, room)}</button>`; }).join('')}
-    ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos pueden navegar 1 tramo gratis: toca uno azul en el mapa.</div>' : ''}
+    ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos navegan gratis: 1 tramo por turno, 2 si están mejorados. Toca uno azul en el mapa.</div>' : ''}
     <div class="note">${can ? 'Toca una fila para ver solo esos sitios en el mapa.' : 'Solo puedes construir en tu turno, después de tirar.'}<br>Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades${G.opts.ships ? ` · ${P.shipsLeft} barcos` : ''} · ${G.deckN} cartas en el mazo</div>
     <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
 }

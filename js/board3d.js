@@ -512,7 +512,7 @@ function roadMesh(color, len) {
 }
 export const ROAD_PLANKS = 8, PLANK_GAP = 0.09, PLANK_FALL = 0.22;
 // barco: casco de madera, cubierta, mástil y vela del color del jugador
-function shipMesh(color) {
+function shipMesh(color, lv = 1) {
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
   const s = new THREE.Shape(); s.moveTo(-0.17, 0); s.quadraticCurveTo(-0.15, 0.06, 0, 0.065); s.quadraticCurveTo(0.17, 0.06, 0.2, 0); s.quadraticCurveTo(0.17, -0.06, 0, -0.065); s.quadraticCurveTo(-0.15, -0.06, -0.17, 0);
   const hull = new THREE.ExtrudeGeometry(s, { depth: 0.06, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.01, bevelSegments: 2 });
@@ -528,6 +528,12 @@ function shipMesh(color) {
   const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.21, 6), dark); yard.rotation.x = Math.PI / 2; yard.position.set(0.012, 0.34, 0); body.add(yard);
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.03), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide })); flag.position.set(0.025, 0.39, 0); body.add(flag);
   [-0.05, 0.05].forEach((z) => { const sh = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), new THREE.MeshStandardMaterial({ color: '#c9a44a', metalness: 0.6, roughness: 0.4 })); sh.scale.set(1, 1, 0.4); sh.position.set(-0.05, 0.075, z * 1.32); body.add(sh); });
+  if (lv >= 2) { // barco mejorado: segundo mástil con vela y franja dorada
+    const m2 = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.24, 8), dark); m2.position.set(-0.11, 0.2, 0); body.add(m2);
+    const s2 = new THREE.Mesh(sailGeo, sail.material); s2.rotation.y = Math.PI / 2; s2.scale.set(0.75, 0.7, 0.75); s2.position.set(-0.1, 0.22, 0); body.add(s2);
+    const gold = new THREE.MeshStandardMaterial({ color: '#d9b44a', metalness: 0.6, roughness: 0.35 });
+    [-1, 1].forEach((z) => { const st = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.012, 0.006), gold); st.position.set(0.01, 0.07, z * 0.072); body.add(st); });
+  }
   body.scale.setScalar(1.6);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
@@ -865,8 +871,9 @@ export class Board3D {
       seen.add(sh.id);
       let m = this.ships[sh.id];
       const P = pose(sh.e);
+      if (m && (m.userData.lv || 1) !== (sh.lv || 1)) { this.root.remove(m); delete this.ships[sh.id]; m = null; } // mejorado: se cambia el modelo
       if (!m) {
-        m = shipMesh(colors[sh.p]); m.userData = { e: sh.e, base: P }; m.position.set(P.x, -0.06, P.z); m.rotation.y = P.ry;
+        m = shipMesh(colors[sh.p], sh.lv || 1); m.userData = { e: sh.e, base: P, lv: sh.lv || 1 }; m.position.set(P.x, -0.06, P.z); m.rotation.y = P.ry;
         this.root.add(m); this.ships[sh.id] = m;
         if (this.ready) { m.position.y = 0.8; this.tween(0.8, (k) => { m.position.y = -0.06 + (1 - k) * (1 - k) * 0.86; }); }
       } else if (m.userData.e !== sh.e) {
