@@ -370,7 +370,9 @@ export function targets(G, p, mode) {
   if (mode === 'city' && P.cities > 0) B.verts.forEach((V) => { if (canCityV(G, p, V.id)) T.v.push(V.id); });
   return T;
 }
-export function pirateTargets(G, p) { return G.players.map((_, q) => q).filter((q) => q !== p && total(G, q) > 0 && (G.ships || []).some((s) => s.p === q)); }
+// en el móvil no se ven las cartas de los demás, solo cuántas tienen (n)
+const handSize = (G, q) => (typeof G.players[q].n === 'number' ? G.players[q].n : total(G, q));
+export function pirateTargets(G, p) { return G.players.map((_, q) => q).filter((q) => q !== p && handSize(G, q) > 0 && (G.ships || []).some((s) => s.p === q)); }
 export function canPlayDev(G, p, i) {
   const d = G.players[p].dev[i];
   if (d && d.t === 'pirate' && !pirateTargets(G, p).length) return false;
