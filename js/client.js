@@ -83,8 +83,31 @@ function lostBanner() {
   if (Date.now() - lostSince > 5000) { if (!$('#lost')) { document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando<span class="dots"></span><small>Toca para reintentar</small></div>`); $('#lost').onclick = () => { const d = net && net.diag ? net.diag() : null; if (net && net.retry) net.retry(); toast(d ? `Reintentando… (${d.url.split('/')[2].split(':')[0]}, intento ${d.tries}${d.err ? ', ' + d.err : ''}, sin datos hace ${d.secs} s)` : 'Reintentando…'); }; } }
   else if (!lostTimer) lostTimer = setTimeout(() => { lostTimer = null; lostBanner(); }, 5200);
 }
+// mando dentro del propio anfitrión: canal directo con la página de arriba (no depende de internet)
+let viaNet = false;
+function joinParent(h) {
+  let last = Date.now(), open = false;
+  const onm = (e) => {
+    if (e.source !== window.parent || !e.data) return;
+    const k = e.data.colonos;
+    if (k === 'lack' && !open) { open = true; last = Date.now(); h.onOpen(); }
+    else if (k === 'net') { last = Date.now(); h.onMessage(e.data.data); }
+    else if (k === 'retired') { viaNet = true; connect(); } // otro móvil lleva ahora la partida
+    else if (k === 'netok') { const st = e.data.ok ? 'open' : 'lost'; if (open && U.status !== st) { U.status = st; lostBanner(); } }
+  };
+  addEventListener('message', onm);
+  post('lhello');
+  const iv = setInterval(() => { if (!open) post('lhello'); }, 1000);
+  return { send: (data) => { if (data.t !== 'ping') post('net', { data }); return true; }, close: () => { removeEventListener('message', onm); clearInterval(iv); }, relay: false, url: '', lastIn: () => last, retry: () => post('lhello'), diag: () => ({ url: 'local/', tries: 0, err: '', secs: 0 }) };
+}
 function connect() {
   if (net) net.close();
+  store.set('colonos-name', U.name); store.set('colonos-color', U.color); store.set('colonos-lastcode', U.code);
+  if (EMBED && !viaNet) {
+    U.status = 'connecting';
+    net = joinParent({ onOpen: () => { U.status = 'open'; net.send({ t: 'hello', token: token(), name: U.name, color: U.color }); lostBanner(); render(); }, onMessage: onMsg });
+    return;
+  }
   U.status = 'connecting'; render();
   store.set('colonos-name', U.name); store.set('colonos-color', U.color); store.set('colonos-lastcode', U.code);
   net = joinRoom(U.code, {

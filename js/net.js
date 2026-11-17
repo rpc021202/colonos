@@ -64,6 +64,7 @@ function hostMqtt(code, h, url) {
           save: (txt) => { lastG = txt; if (!replaced && c.connected) c.publish(base + '/g', txt, { qos: 1, retain: true }); },
           // la última partida guardada en el servidor (por si otro la ha seguido llevando)
           saved: () => new Promise((res) => { savedWait.push(res); c.subscribe(base + '/g', { qos: 1 }); setTimeout(() => res(null), 4000); }),
+          connected: () => c.connected,
           // cierre limpio: así el servidor no publica el aviso de "se ha ido"
           close: () => { closed = true; clearTimeout(aliveT); clearInterval(beat); try { c.end(false); } catch (e) {} },
         });

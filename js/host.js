@@ -47,7 +47,7 @@ function qrSVG(text, cell = 6) {
   try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: cell, margin: 0, scalable: true }); }
   catch (e) { return ''; }
 }
-let remoteT = null, retired = false;
+let remoteT = null, retired = false, netWatch = null;
 function save() {
   if (retired) return;
   try { localStorage.setItem(SAVE, JSON.stringify({ code, cfg, lobby: lobby.map(({ token, name, color, bot }) => ({ token, name, color, bot })), G, t: Date.now() })); } catch (e) {}
@@ -217,6 +217,7 @@ async function onReplaced() {
   if (!G) return;
   if (cfg.self) { // desde el móvil: este sigue jugando como uno más y el otro lleva la partida
     retired = true; const r = room; room = null; try { r.close(); } catch (e) {}
+    conns.delete('local'); if (selfFrame && selfFrame.contentWindow) selfFrame.contentWindow.postMessage({ colonos: 'retired' }, location.origin); // el mando pasa a conectarse por internet con quien la lleve ahora
     try { localStorage.removeItem(SAVE); } catch (e) {}
     return;
   }
@@ -230,7 +231,8 @@ async function onReplaced() {
   render(); save();
   toast('Partida recuperada');
 }
-function send(cid, m) { room && room.send(cid, m); }
+// el mando del propio móvil (iframe) habla con la partida directamente, sin pasar por internet
+function send(cid, m) { if (cid === 'local') { if (selfFrame && selfFrame.contentWindow) selfFrame.contentWindow.postMessage({ colonos: 'net', data: m }, location.origin); return; } room && room.send(cid, m); }
 function broadcastLobby() {
   for (const [cid, tok] of conns) send(cid, { t: 'lobby', you: tokenToPid(tok), players: lobby.map((p) => ({ name: p.name, color: p.color })), cfg: { fog: cfg.fog, ships: cfg.mode === 'ships', target: cfg.target, N: landPlan(Math.max(2, lobby.length), cfg.density, cfg.mode === 'ships').N } });
   render();
@@ -411,6 +413,9 @@ document.addEventListener('visibilitychange', () => { if (selfFrame && document.
 addEventListener('message', (e) => {
   if (!selfFrame || e.source !== selfFrame.contentWindow || !e.data || !e.data.colonos) return;
   const m = e.data.colonos;
+  if (m === 'net') { if (!retired && G !== undefined) onMsg('local', e.data.data); return; }
+  if (m === 'lhello') { if (!netWatch) netWatch = setInterval(() => { // el mando del móvil sabe si la partida llega a los demás
+      const ok = !!(room && (!room.connected || room.connected())); if (selfFrame && selfFrame.contentWindow) selfFrame.contentWindow.postMessage({ colonos: 'netok', ok }, location.origin); }, 2000); selfFrame.contentWindow.postMessage({ colonos: retired ? 'retired' : 'lack' }, location.origin); return; }
   if (m === 'addbot' && !G && lobby.length < 8) { addBot(); broadcastLobby(); save(); }
   if (m === 'rmbot' && !G) { const p = lobby[e.data.i]; if (p && p.bot) { lobby.splice(e.data.i, 1); broadcastLobby(); save(); } }
   if (m === 'go' && !G && lobby.length >= 2) startGame();
@@ -485,4 +490,4 @@ addEventListener('beforeunload', () => { if (G) save(); });
 board.setBoard(genBoard(19), { fog: false }); board.spin(true);
 if (new URLSearchParams(location.search).has('no3d')) { board.setActive(false); board.setActive = () => {}; } // solo para pruebas
 render();
-window.__host = { get G() { return G; }, get lobby() { return lobby; }, get code() { return code; }, board, push: () => broadcastState() };
+window.__host = { get G() { return G; }, get lobby() { return lobby; }, get code() { return code; }, get conns() { return conns; }, get board() { return board; }, push: () => broadcastState() };
