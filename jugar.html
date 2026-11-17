@@ -158,6 +158,14 @@ button.ck{font:inherit;cursor:pointer}
 #fan{z-index:9!important;left:50%;bottom:calc(18px + var(--sab,env(safe-area-inset-bottom)));transform:translateX(-50%);display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;justify-content:center;width:max-content;max-width:96vw}
 #fan .sp{width:10px}
 .fanm{display:flex;gap:9px;justify-content:center;flex-wrap:wrap;margin:14px 0 8px}
+/* escena del ganador */
+#wincine{left:0;right:0;bottom:calc(18px + var(--sab,env(safe-area-inset-bottom)));display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;text-align:center;animation:winin .8s ease-out both;animation-delay:.8s}
+#wincine .crown{font-size:46px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.4));animation:bob 2s ease-in-out infinite}
+#wincine h1{margin:0;font-size:34px;color:#fff;text-shadow:0 3px 12px rgba(0,0,0,.6),0 0 30px rgba(255,213,74,.5)}
+#wincine .pts{color:#fff;font-weight:600;text-shadow:0 2px 6px rgba(0,0,0,.6);display:flex;align-items:center;gap:6px}
+#wincine button{pointer-events:auto;margin-top:8px;font-size:17px;padding:12px 26px;border-radius:16px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+@keyframes winin{from{transform:translateY(30px);opacity:0}}
+@keyframes bob{50%{transform:translateY(-6px)}}
 /* vertical */
 @media (orientation:portrait){
   #rivals{top:calc(50px + var(--sat,env(safe-area-inset-top)));max-width:96vw}

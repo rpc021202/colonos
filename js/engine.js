@@ -279,8 +279,18 @@ export function newGame(opts) {
 // estadísticas para el resumen final (se crean al vuelo, también en partidas guardadas de antes)
 export function stats(G) {
   const n = G.players.length;
-  if (!G.stats) G.stats = { got: Array(n).fill(0), stole: Array(n).fill(0), lost: Array(n).fill(0), disc: Array(n).fill(0), hex: {} };
+  if (!G.stats) G.stats = { got: Array(n).fill(0), stole: Array(n).fill(0), lost: Array(n).fill(0), disc: Array(n).fill(0), hex: {}, vtx: {} };
+  if (!G.stats.vtx) G.stats.vtx = {};
   return G.stats;
+}
+// para la escena final: la casa que más ha producido del ganador (su "capital") y todas sus casas
+export function winnerSpots(G, st) {
+  const p = G.winner; if (p === null || p === undefined) return null;
+  const mine = G.board.verts.filter((v) => v.b && v.b.p === p);
+  if (!mine.length) return null;
+  const vt = (st && st.vtx) || {};
+  const main = mine.slice().sort((a, b) => (vt[b.id] || 0) - (vt[a.id] || 0) || (b.b.t === 'c') - (a.b.t === 'c'))[0];
+  return { main: main.id, verts: mine.map((v) => v.id) };
 }
 export function log(G, m) { G.log.unshift(m); if (G.log.length > 60) G.log.length = 60; }
 export function pn(G, i) { return esc(G.players[i].name); }
@@ -484,7 +494,7 @@ function produce(G, n) {
     if (parts.length) { any = true; log(G, `<b>${pn(G, i)}</b> recibe ${parts.join(' ')}`); G.ev.push({ t: 'gain', to: i, m: `Recibes ${parts.join(' ')}` }); }
   });
   if (!any) log(G, 'Nadie recibe nada');
-  fx.forEach((f) => { if (gains[f.p][f.r]) { const H = stats(G).hex; H[f.h] = (H[f.h] || 0) + f.n; } });
+  fx.forEach((f) => { if (gains[f.p][f.r]) { const S = stats(G); S.hex[f.h] = (S.hex[f.h] || 0) + f.n; S.vtx[f.v] = (S.vtx[f.v] || 0) + f.n; } });
   G.ev.push({ t: 'produce', hexes, flows, fx: fx.filter((f) => gains[f.p][f.r] > 0) });
 }
 function startSeven(G) {

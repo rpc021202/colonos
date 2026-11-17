@@ -1,5 +1,5 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
-import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats } from './engine.js';
+import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats, winnerSpots } from './engine.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
 document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}#win .card{max-height:92vh;overflow-y:auto}</style>`);
 import { Board3D } from './board3d.js';
@@ -150,7 +150,8 @@ function renderHUD() {
     ${diceHistHTML()}
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
   </div>
-  ${G.winner !== null && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
+  ${G.winner !== null && !G._cineDone ? `<div id="wincine"><div class="crown">🏆</div><h1>¡${pn(G, G.winner)} gana!</h1><div class="pts">${vp(G, G.winner, true)} puntos</div><button class="primary" data-a="cinenext">Siguiente →</button></div>` : ''}
+  ${G.winner !== null && G._cineDone && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
     ${G.players.map((_, i) => i).sort((a, b) => vp(G, b, true) - vp(G, a, true)).map((i) => `<div class="score"><span class="chip" style="background:${G.players[i].color}"></span>${pn(G, i)}<span>${vp(G, i, true)}</span></div>`).join('')}
     ${summaryHTML(G.players, { ...stats(G), rolls: G.rolls || [] }, G.board.hexes)}
     <div class="seg" style="margin-top:18px"><button class="ghost" data-a="closewin">Ver tablero</button><button class="primary" data-a="again">Otra partida</button></div></div></div>` : ''}`;
@@ -294,7 +295,11 @@ function afterAct() {
     else if (e.t === 'gain') later(() => sendTo(e.to, { t: 'note', m: e.m }));
     else if (e.t === 'turn') { board.seatView(e.p, G.players.length); sendTo(e.p, { t: 'yourturn' }); if (!e.setup) sound.play('turn'); }
     else if (e.t === 'sbp') sendTo(e.p, { t: 'yourturn', sbp: true });
-    else if (e.t === 'win') { setTimeout(() => banner(`🏆 ¡${G.players[e.p].name} gana!`), 300); sound.play('win'); }
+    else if (e.t === 'win') {
+      sound.play('win');
+      // escena del ganador: la cámara vuela a la casa que más ha producido y hay fuegos artificiales en todas las suyas
+      const w = winnerSpots(G, stats(G)); if (w) setTimeout(() => board.victory(w.main, w.verts, G.players[e.p].color), 900);
+    }
   });
   // lo que ha pasado, para que cada móvil anime los dados y ponga los sonidos
   const fx = evs.filter((e) => ['roll', 'produce', 'build', 'sail', 'pirate', 'robber', 'devbuy', 'turn', 'win'].includes(e.t) || (e.t === 'banner' && e.m.startsWith('🤝')))
@@ -335,6 +340,7 @@ function startGame() {
   G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands });
   staticB = boardStatic(G);
   screen = 'game';
+  board.stopVictory(); board.followTurn = !board.mobile;
   board.spin(false);
   board.ready = false;
   board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed });
@@ -447,6 +453,7 @@ document.addEventListener('click', async (e) => {
     case 'copy': try { await navigator.clipboard.writeText(joinURL()); toast('Enlace copiado'); } catch (ex) { toast(joinURL()); } break;
     case 'share': try { await navigator.share({ title: 'Catán', text: `¡Únete a mi partida! Código ${code}`, url: joinURL() }); } catch (ex) {} break;
     case 'closewin': G._winClosed = true; renderHUD(); break;
+    case 'cinenext': G._cineDone = true; renderHUD(); break;
     case 'again': {
       if (demo) { G = null; lobby = []; for (let i = 0; i < 4; i++) addBot(); startGame(); break; }
       G = null; staticB = null; screen = 'lobby'; previewKey = ''; preview();

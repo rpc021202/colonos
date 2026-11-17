@@ -1,6 +1,6 @@
 // Mando del jugador (móvil): una sola pantalla con el mapa 3D, la mano abajo, los rivales arriba
 // y los menús de construir / comerciar / partida a un lado. Funciona en horizontal y en vertical.
-import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets, upgradableShips } from './engine.js';
+import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets, upgradableShips, winnerSpots } from './engine.js';
 import { joinRoom, unpack } from './net.js';
 import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
@@ -122,7 +122,14 @@ function onMsg(m) {
       U.S = m.s; U.G = mirror(U.B, m.s);
       autoState();
       if (U.sel && !optionsFor(U.sel).length) U.sel = null;
-      sync3D(); render(); break;
+      sync3D();
+      // escena del ganador: la cámara vuela a su casa principal y salen fuegos artificiales
+      if (U.G.winner !== null && !U.cineStarted && b3) {
+        U.cineStarted = true;
+        const w = winnerSpots(U.G, U.S.stats);
+        if (w) setTimeout(() => b3.victory(w.main, w.verts, U.G.players[U.G.winner].color), 900);
+      }
+      render(); break;
     }
     case 'fx': playFx(m.l || []); if (U.rolling) render(); break;
     case 'note': toast(m.m); break;
@@ -130,7 +137,7 @@ function onMsg(m) {
     case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
     case 'full': U.screen = 'join'; U.msg = m.m; net && net.close(); net = null; render(); break;
     case 'closed': U.screen = 'join'; U.msg = 'La partida se ha cerrado. ¡Gracias por jugar!'; U.S = null; U.G = null; U.B = null; U.needBoard = true; net && net.close(); net = null; U.status = 'idle'; render(); break;
-    case 'reset': U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; U.needBoard = true; render(); break;
+    case 'reset': U.cineStarted = false; U.cineDone = false; U.winSeen = false; U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; U.needBoard = true; render(); break;
   }
 }
 function autoState() {
@@ -313,6 +320,11 @@ function phaseLine(G) {
 }
 function gameHTML() {
   const G = U.G, me = U.me, P = G.players[me];
+  if (G.winner !== null && !U.cineDone && !U.winSeen) {
+    const W = G.players[G.winner];
+    return `<div id="wincine"><div class="crown">🏆</div><h1>${G.winner === me ? '¡Has ganado!' : `¡${esc(W.name)} gana!`}</h1><div class="pts"><span class="chip" style="background:${W.color}"></span> ${W.vp} puntos</div>
+      <button class="primary" data-a="cinenext">Siguiente →</button></div>`;
+  }
   const rolls = (G.rolls || []).slice(-5).reverse();
   const O = G.offer, incoming = O && O.from !== me && (O.to == null || O.to === me) && !O.acc[me] && !O.rej[me];
   const canAny = canBuildNow() && [COST.road, COST.settlement, COST.city, COST.dev].concat(G.opts.ships ? [COST.ship] : []).some((c) => afford(G, me, c));
@@ -426,7 +438,7 @@ function modalHTML() {
   const G = U.G; if (U.screen !== 'game' || !G) return '';
   const me = U.me, P = G.players[me];
   const box = (inner) => `<div class="modal"><div class="box">${inner}</div></div>`;
-  if (G.winner !== null && !U.winSeen) {
+  if (G.winner !== null && !U.winSeen && U.cineDone) {
     const order = G.players.map((_, i) => i).sort((a, b) => G.players[b].vp - G.players[a].vp);
     return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}
     ${summaryHTML(G.players, U.S.stats, U.B.hexes)}${EMBED ? '<button class="primary big" data-a="selfagain">🔁 Otra partida con los mismos</button><div class="note" style="text-align:center">Podrán unirse más con el mismo código antes de empezar.</div>' : ''}
@@ -548,6 +560,7 @@ document.addEventListener('click', (e) => {
     case 'deal': send({ t: 'confirm', q: +d.q }); break;
     case 'canceloffer': send({ t: 'cancelOffer' }); break;
     case 'winok': U.winSeen = true; render(); break;
+    case 'cinenext': U.cineDone = true; render(); break;
     case 'gohome':
       if (EMBED) { if (U.G && U.G.winner === null && !confirm('¿Cerrar la partida para todos y volver al inicio?')) break; post('home'); }
       else { if (U.G && U.G.winner === null && !confirm('¿Salir de la partida?')) break; net && net.close(); location.href = 'index.html' + (LOCAL ? '?local=1' : ''); }
@@ -555,7 +568,7 @@ document.addEventListener('click', (e) => {
     case 'addbot': post('addbot'); break;
     case 'rmbot': post('rmbot', { i: +d.i }); break;
     case 'selfgo': post('go'); break;
-    case 'selfagain': U.winSeen = false; post('again'); break;
+    case 'selfagain': U.winSeen = false; U.cineStarted = false; U.cineDone = false; post('again'); break;
     case 'sharelink': e.preventDefault(); navigator.share({ title: 'Catán', text: `¡Únete a mi partida de Catán! Código ${U.code}`, url: friendURL() }).catch(() => {}); break;
     case 'copylink': e.preventDefault(); navigator.clipboard.writeText(friendURL()).then(() => toast('Enlace copiado'), () => toast(friendURL())); break;
     case 'sfx': sound.unlock(); sound.setSfx(!sound.sfxOn); render(); break;

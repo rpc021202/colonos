@@ -675,7 +675,8 @@ export class Board3D {
   animateLife(dt, time) {
     const L = this.life; if (!L) return;
     if (L.walkers) this.animateWalkers(dt, time);
-    if (this.aura && !this.aura.userData.fading) { const [veil, ring] = this.aura.userData.mats; if (veil.opacity > 0.05) { veil.opacity = 0.26 + 0.06 * Math.sin(time * 1.6); ring.opacity = 0.4 + 0.2 * Math.sin(time * 2.3); } }
+    if (this.victoryOn && this.victoryOn.verts.length) { const vo = this.victoryOn; vo.t -= dt; if (vo.t <= 0) { const V = vo.verts[Math.floor(Math.random() * vo.verts.length)]; this.firework(V.x + rand(-0.1, 0.1), V.y + rand(-0.1, 0.1), vo.color); vo.t = 0.35 + Math.random() * 0.5; } }
+    if (this.aura && !this.aura.userData.fading) { const [veil, ring] = this.aura.userData.mats; if (veil.opacity > 0.05) { veil.opacity = 0.38 + 0.06 * Math.sin(time * 1.6); ring.opacity = 0.4 + 0.2 * Math.sin(time * 2.3); } }
     if (this.trophies) Object.values(this.trophies).forEach((tr) => { if (tr && tr.userData.flag) tr.userData.flag.rotation.y = Math.sin(time * 2.2 + tr.userData.ph) * 0.25; });
     L.foam.forEach((f) => { f.material.opacity = 0.22 + 0.2 * Math.sin(time * 1.3 + f.userData.ph); const k = 1 + 0.025 * Math.sin(time * 1.3 + f.userData.ph); f.scale.set(k, k, 1); });
     L.sheep.forEach((sh) => {
@@ -722,7 +723,7 @@ export class Board3D {
   }
   clear() {
     this.scene.remove(this.root); this.root = new THREE.Group(); this.scene.add(this.root);
-    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [], walkers: {} }; this.ships = {}; this.trophies = null; this.aura = null;
+    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [], walkers: {} }; this.ships = {}; this.trophies = null; this.aura = null; this.victoryOn = null; if (this.controls) this.controls.autoRotate = false;
   }
   setBoard(B, opts = {}) {
     this.clear(); this.B = B; SEED = (opts.seed || B.hexes.length * 7919 + Math.round(B.hexes[0].x * 1000)) | 0;
@@ -789,7 +790,7 @@ export class Board3D {
       const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 0.98, 0.3, 6, 1, true), new THREE.MeshBasicMaterial({ color: '#fff6c2', transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
       glow.position.y = TOP + 0.12; g.add(glow);
       this.root.add(g);
-      return { h, g, base: land, feat, token, glow, hidden: false, T };
+      return { h, g, base: land, top, feat, token, glow, hidden: false, T };
     });
     // puertos: muelle de madera con cartel
     const wood = new THREE.MeshStandardMaterial({ color: '#7d5833', roughness: 0.9, flatShading: true });
@@ -913,13 +914,13 @@ export class Board3D {
     const prev = this.aura; this.aura = null;
     if (prev) { const ms = prev.userData.mats; if (animate) this.tween(0.8, (k) => ms.forEach((m) => (m.opacity = m.userData.o * (1 - k))), () => this.root.remove(prev)); else this.root.remove(prev); }
     const g = new THREE.Group(); g.position.set(t.h.x, 0, t.h.y);
-    const veil = new THREE.MeshBasicMaterial({ color: '#160a22', transparent: true, opacity: 0.3, depthWrite: false });
-    const box = new THREE.Mesh(new THREE.CylinderGeometry(0.985, 0.985, 1.0, 6, 1, false), veil); box.rotation.y = Math.PI / 6; box.position.y = 0.42; box.renderOrder = 3;
+    const veil = new THREE.MeshBasicMaterial({ color: '#12071c', transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    // sombra sobre el propio relieve de la casilla (encaja exactamente con el hexágono)
+    if (t.top) { const sh = new THREE.Mesh(t.top.geometry, veil); sh.position.y = 0.004; sh.renderOrder = 3; g.add(sh); }
     const ringM = new THREE.MeshBasicMaterial({ color: '#7a3cff', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.16, 6, 1, true), ringM); ring.rotation.y = Math.PI / 6; ring.position.y = TOP + 0.04;
-    veil.userData.o = 0.3; ringM.userData.o = 0.55;
-    g.add(box, ring); g.userData = { mats: [veil, ringM], hex: h }; g.visible = !t.hidden;
-    if (t.hidden) { g.visible = false; }
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.985, 0.985, 0.12, 6, 1, true), ringM); ring.position.y = TOP + 0.03; // misma orientación que la casilla
+    veil.userData.o = 0.42; ringM.userData.o = 0.55;
+    g.add(ring); g.userData = { mats: [veil, ringM], hex: h }; g.visible = !t.hidden;
     this.root.add(g); this.aura = g;
     if (animate) { [veil, ringM].forEach((m) => (m.opacity = 0)); setTimeout(() => this.tween(0.9, (k) => [veil, ringM].forEach((m) => (m.opacity = m.userData.o * k))), Math.min(3800, 1200)); }
   }
@@ -1113,6 +1114,42 @@ export class Board3D {
       const sp = textSprite(String(d1 + d2), 0.9, d1 + d2 === 7 ? '#ff6b5b' : '#fff'); sp.position.copy(hit).setY(1.2); this.root.add(sp);
       this.tween(2.2, (k) => { sp.position.y = 1.2 + k * 0.4; sp.material.opacity = k < 0.75 ? 1 : (1 - k) / 0.25; }, () => this.root.remove(sp));
     }, 1550);
+  }
+  /* ---------- final: la cámara vuela a la casa principal del ganador y hay fuegos artificiales ---------- */
+  victory(mainV, verts, color) {
+    const B = this.B; if (!B || this.victoryOn) return;
+    const V = B.verts[mainV]; if (!V) return;
+    this.victoryOn = { verts: verts.map((v) => B.verts[v]).filter(Boolean), color, t: 0.6 };
+    this.followTurn = false; this.userMoved = performance.now();
+    const T = new THREE.Vector3(V.x, 0.25, V.y), t0 = this.controls.target.clone(), p0 = this.camera.position.clone();
+    const dir = p0.clone().sub(t0).setY(0); if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1); dir.normalize();
+    const dist = this.mobile ? 4.4 : 4.0, p1 = T.clone().add(dir.multiplyScalar(dist * 0.62)).setY(T.y + dist * 0.82); // vista de dron
+    this.controls.autoRotate = false;
+    this.tween(2.6, (k) => { const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2; this.controls.target.lerpVectors(t0, T, e); this.camera.position.lerpVectors(p0, p1, e); },
+      () => { this.controls.autoRotate = true; this.controls.autoRotateSpeed = 0.9; });
+  }
+  stopVictory() { this.victoryOn = null; this.controls.autoRotate = false; }
+  firework(x, z, color) {
+    const y0 = TOP + 0.2, top = 1.0 + Math.random() * 0.7;
+    const rk = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 4), new THREE.MeshBasicMaterial({ color: '#fff3c4' }));
+    rk.position.set(x, y0, z); this.root.add(rk);
+    this.tween(0.75, (k) => { rk.position.y = y0 + (top - y0) * (1 - (1 - k) * (1 - k)); }, () => {
+      this.root.remove(rk);
+      const n = this.mobile ? 50 : 80, pos = new Float32Array(n * 3), vel = [], cols = new Float32Array(n * 3), c1 = new THREE.Color(color), c2 = new THREE.Color(Math.random() < 0.5 ? '#ffd54a' : '#ffffff');
+      for (let i = 0; i < n; i++) {
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), sp = 0.7 + Math.random() * 0.5;
+        vel.push(new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.cos(ph), Math.sin(ph) * Math.sin(th)).multiplyScalar(sp));
+        const c = i % 3 ? c1 : c2; cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+      }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      const mat = new THREE.PointsMaterial({ size: this.mobile ? 0.09 : 0.07, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const pts = new THREE.Points(geo, mat); pts.position.set(x, top, z); this.root.add(pts);
+      this.tween(1.8, (k) => {
+        const t = k * 1.8;
+        for (let i = 0; i < n; i++) { const v = vel[i]; pos[i * 3] = v.x * t * 0.9; pos[i * 3 + 1] = v.y * t * 0.9 - 0.35 * t * t; pos[i * 3 + 2] = v.z * t * 0.9; }
+        geo.attributes.position.needsUpdate = true; mat.opacity = k < 0.6 ? 1 : (1 - k) / 0.4;
+      }, () => { this.root.remove(pts); geo.dispose(); mat.dispose(); });
+    });
   }
   spin(on) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = 0.6; }
 
