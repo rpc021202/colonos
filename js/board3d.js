@@ -850,7 +850,6 @@ export class Board3D {
     // líneas amarillas discontinuas por el centro de cada calle
     const L = [];
     B.edges.forEach((E) => {
-      if (!E.hexes.some(landH)) return;
       const a = B.verts[E.v[0]], b = B.verts[E.v[1]], ang = -Math.atan2(b.y - a.y, b.x - a.x);
       for (let k = 1; k <= 3; k++) { const t = k / 4; L.push(paint(G_BOX, '#f5d142', M(a.x + (b.x - a.x) * t, TOP + 0.002, a.y + (b.y - a.y) * t, 0.12, 0.004, 0.012, ang))); }
     });
@@ -858,45 +857,8 @@ export class Board3D {
     // grafo de calles (cruces y tramos) para el tráfico y la pasma
     const ok = (v) => B.verts[v].hexes.some(landH);
     this.streetAdj = B.verts.map((V) => (ok(V.id) ? V.adj.filter(ok) : []));
-    // autovía elevada sobre pilares rodeando cada isla
-    const coast = B.edges.filter((E) => E.hexes.filter(landH).length === 1);
-    const deckMat = new THREE.MeshStandardMaterial({ color: '#6d6a66', roughness: 0.85 }), pilMat = new THREE.MeshStandardMaterial({ color: '#8a867f', roughness: 0.9 });
-    const HL = [], HY = 0.75, off = 0.6;
-    const pts = {}; // punto de autovía de cada tramo de costa
-    coast.forEach((E) => {
-      const a = B.verts[E.v[0]], b = B.verts[E.v[1]], h = B.hexes[E.hexes.find(landH)];
-      const mx = (a.x + b.x) / 2, mz = (a.y + b.y) / 2; let nx = mx - h.x, nz = mz - h.y; const nl = Math.hypot(nx, nz); nx /= nl; nz /= nl;
-      const cx = mx + nx * off, cz = mz + nz * off, ang = -Math.atan2(b.y - a.y, b.x - a.x), len = Math.hypot(b.x - a.x, b.y - a.y) * 1.62;
-      pts[E.id] = { x: cx, z: cz, e: E };
-    });
-    // anillos ordenados de la autovía (para los coches que circulan por ella)
-    const byV = {}; coast.forEach((E) => E.v.forEach((v) => (byV[v] = byV[v] || []).push(E.id)));
-    const used = new Set(); this.rings = [];
-    coast.forEach((E0) => {
-      if (used.has(E0.id)) return;
-      const ring = []; let cur = E0.id, v = E0.v[0];
-      for (let guard = 0; guard < 500; guard++) {
-        used.add(cur); ring.push(pts[cur]);
-        const E = B.edges[cur], nv = E.v[0] === v ? E.v[1] : E.v[0];
-        const nxt = (byV[nv] || []).find((id) => id !== cur && !used.has(id));
-        if (nxt === undefined) break; cur = nxt; v = nv;
-      }
-      if (ring.length > 3) this.rings.push(ring);
-    });
-    // tren elevado: viga fina con raíles sobre pilares delgados; en los traficantes hay parada (sin pilar, la escalera la sostiene)
-    const portE = new Set(B.ports.map((pt) => pt.e)); this.ringPt = pts;
     this.streetProps(landH);
-    this.rings.forEach((ring) => {
-      ring.forEach((p, i) => {
-        const q = ring[(i + 1) % ring.length], dx = q.x - p.x, dz = q.z - p.z, len = Math.hypot(dx, dz), ang = -Math.atan2(dz, dx), cx = (p.x + q.x) / 2, cz = (p.z + q.z) / 2, nx = -dz / len, nz = dx / len;
-        HL.push(paint(G_BOX, '#77736d', M(cx, HY, cz, len + 0.06, 0.05, 0.12, ang)));
-        HL.push(paint(G_BOX, '#3b3b3b', M(cx + nx * 0.035, HY + 0.031, cz + nz * 0.035, len + 0.06, 0.012, 0.012, ang)));
-        HL.push(paint(G_BOX, '#3b3b3b', M(cx - nx * 0.035, HY + 0.031, cz - nz * 0.035, len + 0.06, 0.012, 0.012, ang)));
-        if (!portE.has(p.e.id)) { HL.push(paint(G_CYL8, '#8a867f', M(p.x, (HY - 0.1) / 2 - 0.05, p.z, 0.035, HY + 0.1, 0.035))); HL.push(paint(G_BOX, '#8a867f', M(p.x, HY - 0.035, p.z, 0.05, 0.03, 0.16, ang))); }
-      });
-      let tot = 0; ring.cum = ring.map((p, i) => { const q = ring[(i + 1) % ring.length], d = Math.hypot(q.x - p.x, q.z - p.z), c0 = tot; tot += d; return c0; }); ring.tot = tot;
-    });
-    if (HL.length) { const hw = merged(HL, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true })); this.root.add(hw); this.highway = hw; }
+    this.barrioOuter();
     // tráfico: coches normales por las calles
     const palette = ['#e53935', '#fdd835', '#43a047', '#1e88e5', '#ffffff', '#212121', '#8e24aa', '#ff7043', '#90a4ae'];
     this.traffic = [];
@@ -907,12 +869,49 @@ export class Board3D {
       const a = nodes[Math.floor(Math.random() * nodes.length)], b = this.streetAdj[a][0];
       this.traffic.push({ m: c, a, b, t: Math.random(), sp: rand(0.35, 0.6), road: true });
     }
-    // un tren por anillo, con paradas en los traficantes
-    this.rings.forEach((ring) => {
-      const cars = [0, 1, 2].map((k) => { const m = trainCar(k === 0); this.root.add(m); return m; });
-      const stops = ring.map((p, i) => (portE.has(p.e.id) ? ring.cum[i] + Math.hypot(ring[(i + 1) % ring.length].x - p.x, ring[(i + 1) % ring.length].z - p.z) * 0 : -1)).filter((x) => x >= 0);
-      this.traffic.push({ train: true, ring, cars, s: Math.random() * ring.tot, sp: 0.55, stops, wait: 0 });
+  }
+  // la ciudad amurallada: un anillo de edificios alrededor del tablero (sin pistas de dónde hay negocios)
+  barrioOuter() {
+    const B = this.B, L = [], G = [];
+    const ring = B.sea || [];
+    ring.forEach((h, i) => {
+      G.push(barrioGroundGeo(h.x, h.y, '#9a968e'));
+      const hh = 0.3 + ((i * 37) % 7) * 0.035, sc = WAP / 0.866, col = ['#8d8478', '#9b8f80', '#7f7a74', '#a3978a', '#86807a'][i % 5];
+      L.push(paint(G_CYL6, col, M(h.x, TOP + hh / 2, h.y, sc, hh, sc)));
+      L.push(paint(G_CYL6, shade(col, 0.8), M(h.x, TOP + hh + 0.01, h.y, sc * 0.94, 0.02, sc * 0.94)));
+      for (let f = 0; f < 6; f++) { // ventanas por plantas en cada fachada (se encienden de noche)
+        const a = (Math.PI / 3) * f, nx = Math.cos(a), nz = Math.sin(a);
+        for (let fl = 0; WALL_H + 0.05 + fl * 0.085 < hh - 0.03; fl++) for (let w = -2; w <= 2; w++) {
+          if (((i + f + fl + w) * 7) % 5 === 0) continue;
+          const yy = TOP + WALL_H + 0.05 + fl * 0.085, tx = -nz, tz = nx;
+          L.push(paint(G_BOX, (i + f + fl * 3 + w) % 3 ? '#ffd98a' : '#3a4048', M(h.x + nx * (WAP + 0.003) + tx * w * 0.13, yy, h.y + nz * (WAP + 0.003) + tz * w * 0.13, 0.008, 0.045, 0.07, -a)));
+        }
+      }
+      L.push(paint(G_BOX, '#b0b0b0', M(h.x + 0.15, TOP + hh + 0.04, h.y - 0.1, 0.12, 0.06, 0.09))); // aire acondicionado / depósito en el tejado
     });
+    if (G.length) { const g = merged(G, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, flatShading: true })); g.receiveShadow = true; this.root.add(g); }
+    if (L.length) { const m = withWindows(L); m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); this.root.add(m); }
+  }
+  // modo coches: las casillas vacías son descampados con muro, tierra, tiendas de campaña y algún coche abandonado
+  barrioLot(h, g) {
+    const land = new THREE.Group(), L = [], id = h.id, rr = (k) => ((id * 9301 + k * 49297) % 233280) / 233280;
+    land.add(merged([barrioGroundGeo(0, 0, '#8a7a62')], new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true })));
+    const gate = id % 6;
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i, x = Math.cos(a) * WAP, z = Math.sin(a) * WAP, len = WAP * 1.1547 + 0.012;
+      if (i === gate) { const tx = -Math.sin(a), tz = Math.cos(a), part = (len - 0.24) / 2; [-1, 1].forEach((sd) => L.push(paint(G_BOX, '#7f7b75', M(x + tx * sd * (0.12 + part / 2), TOP + WALL_H / 2, z + tz * sd * (0.12 + part / 2), 0.024, WALL_H, part, -a)))); }
+      else L.push(paint(G_BOX, i % 2 ? '#86827c' : '#7f7b75', M(x, TOP + WALL_H / 2, z, 0.024, WALL_H, len, -a)));
+    }
+    for (let k = 0; k < 14; k++) L.push(paint(G_CONE4, '#6b7d3a', M((rr(k) - 0.5) * 0.9, TOP + 0.015, (rr(k + 50) - 0.5) * 0.8, 0.012, 0.03, 0.012, rr(k + 9) * 6))); // hierbajos
+    const kind = id % 3;
+    if (kind === 0 || kind === 2) [[-0.18, -0.1, '#1e88e5'], [0.05, -0.22, '#ef6c00']].slice(0, kind === 0 ? 2 : 1).forEach(([x, z, c]) => { L.push(paint(G_CONE4, c, M(x, TOP + 0.05, z, 0.11, 0.1, 0.09, 0.3))); L.push(paint(G_BOX, '#222', M(x + 0.06, TOP + 0.02, z, 0.004, 0.03, 0.02, 0.3))); }); // tiendas de campaña
+    if (kind !== 2) { L.push(paint(G_CYL8, '#6d4c41', M(0.22, TOP + 0.035, 0.15, 0.025, 0.07, 0.025))); L.push(paint(G_CONE4, '#ff9800', M(0.22, TOP + 0.085, 0.15, 0.018, 0.04, 0.018))); } // bidón
+    for (let k = 0; k < 3; k++) L.push(paint(new THREE.TorusGeometry(1, 0.4, 6, 12), '#1b1b1b', M(-0.25, TOP + 0.012 + k * 0.022, 0.22, 0.03, 0.03, 0.03, 0, Math.PI / 2))); // ruedas apiladas
+    land.add(merged(L, MAT_()));
+    if (kind !== 0) { const car = carBody('#8d6e63', 1); car.scale.setScalar(0.8); car.position.set(0.1, TOP, 0.05); car.rotation.set(0, rr(3) * 6, 0.08); car.traverse((o) => { if (o.isMesh && o.material && o.material.color) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.7); } }); land.add(car); } // coche abandonado
+    land.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.add(land); this.root.add(g);
+    return { h, g, base: land, feat: new THREE.Group(), token: null, glow: new THREE.Mesh(), hidden: false, sea: true, T: { h: () => TOP } };
   }
   streetProps(landH) {
     const B = this.B, P = [], glows = [], lampHeads = [];
@@ -922,7 +921,7 @@ export class Board3D {
       const hs = E.hexes.filter(landH); if (!hs.length) return;
       const a = B.verts[E.v[0]], b = B.verts[E.v[1]], mx = (a.x + b.x) / 2, mz = (a.y + b.y) / 2;
       let ex = b.x - a.x, ez = b.y - a.y; const el = Math.hypot(ex, ez); ex /= el; ez /= el;
-      if (hs.length === 1) { const H = B.hexes[hs[0]]; let ix = H.x - mx, iz = H.y - mz; const il = Math.hypot(ix, iz); this.coastIn[Math.min(E.v[0], E.v[1]) + '-' + Math.max(E.v[0], E.v[1])] = [ix / il, iz / il]; }
+      if (false) { const H = B.hexes[hs[0]]; let ix = H.x - mx, iz = H.y - mz; const il = Math.hypot(ix, iz); this.coastIn[Math.min(E.v[0], E.v[1]) + '-' + Math.max(E.v[0], E.v[1])] = [ix / il, iz / il]; }
       const kk = (E.id * 13) % 11;
       if (kk === 3) { const pd = new THREE.Mesh(new THREE.CircleGeometry(0.06, 14), puddleM); pd.rotation.x = -Math.PI / 2; pd.scale.set(1.5, 0.8, 1); pd.position.set(mx + ex * 0.15, TOP + 0.003, mz + ez * 0.15); this.root.add(pd); }
       if (kk === 6 && hs.length === 2) { // alcantarilla con vapor
@@ -1026,6 +1025,7 @@ export class Board3D {
     } else this.water = new THREE.Mesh(new THREE.PlaneGeometry(ex * 8, ex * 8), wm);
     this.water.rotation.x = -Math.PI / 2; this.water.position.y = -0.1; this.water.receiveShadow = true; this.root.add(this.water);
     if (BARRIO) { // descampado de asfalto viejo en vez de mar
+      this.water.position.y = TOP - 0.02;
       this.water.material = new THREE.MeshStandardMaterial({ color: '#2c2b31', roughness: 0.95, normalMap: this.detailTex, normalScale: new THREE.Vector2(0.4, 0.4) });
       this.water.material.normalMap.repeat && this.water.material.normalMap.repeat.set(ex * 2, ex * 2);
     }
@@ -1050,6 +1050,7 @@ export class Board3D {
     this.tiles = B.hexes.map((h) => {
       const g = new THREE.Group(); g.position.set(h.x, 0, h.y);
       if (BARRIO && h.res !== 'sea') return this.barrioTile(h, g);
+      if (BARRIO) return this.barrioLot(h, g);
       if (h.res === 'sea') { // casilla de mar navegable: sin tierra, solo agua (más clara junto a la costa)
         const base = new THREE.Group();
         if (!BARRIO && h.nb.some((id) => B.hexes[id].res !== 'sea')) { const sh = new THREE.Mesh(G_CYL6, shallowMat); sh.position.y = -0.075; sh.scale.set(1, 0.03, 1); base.add(sh); }
@@ -1091,36 +1092,19 @@ export class Board3D {
     B.ports.forEach((pt) => {
       const e = B.edges[pt.e], a = B.verts[e.v[0]], b = B.verts[e.v[1]];
       const grp = new THREE.Group();
-      if (this.theme === 'barrio') { // parada del tren: andén, escalera de caracol y el traficante debajo con su furgoneta
-        const hx = B.hexes[pt.hex], rp = (this.ringPt || {})[pt.e] || { x: pt.x, z: pt.y };
-        let ox = rp.x - hx.x, oz = rp.z - hx.y; const ol = Math.hypot(ox, oz) || 1; ox /= ol; oz /= ol; const ang = Math.atan2(ox, oz), HY = 0.75;
-        const L = [];
-        B_(L, '#9a958d', rp.x + ox * 0.13, HY - 0.005, rp.z + oz * 0.13, 0.46, 0.025, 0.15); // andén (alineado con la vía)
-        L.forEach((m) => m.applyMatrix4(new THREE.Matrix4().makeTranslation(-(rp.x + ox * 0.13), 0, -(rp.z + oz * 0.13))));
-        const plat = merged(L, MAT_()); plat.position.set(rp.x + ox * 0.13, 0, rp.z + oz * 0.13); plat.rotation.y = ang; grp.add(plat);
-        const sx = rp.x + ox * 0.3, sz = rp.z + oz * 0.3, S = [];
-        S.push(paint(G_CYL8, '#6f6c67', M(sx, (HY + 0.1) / 2 - 0.1, sz, 0.02, HY + 0.1, 0.02)));
-        let prevT = null;
-        for (let k = 0; k < 14; k++) {
-          const a2 = k * 0.62, yy = -0.08 + (k + 1) * (HY + 0.07) / 14; S.push(paint(G_BOX, '#c8c3ba', M(sx + Math.sin(a2) * 0.05, yy, sz + Math.cos(a2) * 0.05, 0.1, 0.01, 0.045, a2 + Math.PI / 2)));
-          const tx = sx + Math.sin(a2) * 0.097, tz = sz + Math.cos(a2) * 0.097, ty = yy + 0.06; // barandilla: barrote y pasamanos
-          S.push(paint(G_BOX, '#4a4a4a', M(tx, yy + 0.03, tz, 0.004, 0.06, 0.004)));
-          if (prevT) { const dx = tx - prevT[0], dy = ty - prevT[1], dz = tz - prevT[2], l = Math.hypot(dx, dy, dz); const mm = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), new THREE.Vector3(dx, dy, dz), new THREE.Vector3(0, 1, 0)); const g2 = G_BOX.clone(); g2.scale(0.005, 0.005, l); g2.applyMatrix4(mm); g2.translate((tx + prevT[0]) / 2, (ty + prevT[1]) / 2, (tz + prevT[2]) / 2); S.push(paint(g2, '#4a4a4a', new THREE.Matrix4())); }
-          prevT = [tx, ty, tz];
-        }
-        { // barandilla del andén por el lado de fuera
-          const bx = rp.x + ox * 0.2, bz = rp.z + oz * 0.2, tx2 = -oz, tz2 = ox;
-          S.push(paint(G_BOX, '#4a4a4a', M(bx, HY + 0.06, bz, 0.46, 0.005, 0.005, -Math.atan2(tz2, tx2))));
-          for (let k = -2; k <= 2; k++) S.push(paint(G_BOX, '#4a4a4a', M(bx + tx2 * k * 0.11, HY + 0.03, bz + tz2 * k * 0.11, 0.004, 0.06, 0.004)));
-        }
-        S.push(paint(G_BOX, '#c8c3ba', M(rp.x + ox * 0.22, HY - 0.005, rp.z + oz * 0.22, 0.12, 0.02, 0.12, -ang)));
-        grp.add(merged(S, MAT_()));
-        const px = -oz, pz = ox; // a un lado de la escalera, la furgoneta; debajo, el encapuchado
-        const van = dealerVan(pt.type === 'any' ? '#9e9e9e' : RINFO[pt.type].c); van.position.set(sx + px * 0.22 + ox * 0.05, 0, sz + pz * 0.22 + oz * 0.05); van.rotation.y = ang; grp.add(van);
-        const guy = walkerMesh('#1d1d22', null); guy.scale.setScalar(2.1); guy.position.set(sx + ox * 0.1, -0.1, sz + oz * 0.1); guy.rotation.y = ang + Math.PI; grp.add(guy);
-        const hood = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), new THREE.MeshStandardMaterial({ color: '#1d1d22' })); hood.scale.setScalar(2.1); hood.position.set(guy.position.x, -0.1 + 0.095 * 2.1, guy.position.z); grp.add(hood);
+      if (this.theme === 'barrio') { // almacén del traficante al otro lado de la calle, con su logo en grafiti, y un tío en cada esquina del trato
+        const hx = B.hexes[pt.hex], mx = (a.x + b.x) / 2, mz = (a.y + b.y) / 2; let nx = mx - hx.x, nz = mz - hx.y; const nl = Math.hypot(nx, nz); nx /= nl; nz /= nl;
+        const ang = Math.atan2(nx, nz), d0 = 0.17, L = [];
+        const wh = new THREE.Group(); wh.position.set(mx + nx * (d0 + 0.1), 0, mz + nz * (d0 + 0.1)); wh.rotation.y = ang; grp.add(wh);
+        B_(L, '#4f6d7a', 0, TOP + 0.13, 0, 0.62, 0.26, 0.2); B_(L, '#3b525c', 0, TOP + 0.265, 0, 0.64, 0.012, 0.21); for (let k = 0; k < 12; k++) B_(L, '#5d7d8a', -0.29 + k * 0.053, TOP + 0.13, -0.101, 0.012, 0.25, 0.003); // nave de chapa
+        B_(L, '#8a9097', 0.13, TOP + 0.085, -0.103, 0.22, 0.17, 0.004); for (let k = 0; k < 8; k++) B_(L, '#6d737a', 0.13, TOP + 0.01 + k * 0.021, -0.106, 0.22, 0.004, 0.003); // persiana
+        wh.add(merged(L, MAT_()));
+        if (pt.type !== 'any') { const lg = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.24), new THREE.MeshStandardMaterial({ map: logoTex(pt.type), transparent: true, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 })); lg.position.set(-0.15, TOP + 0.135, -0.106); lg.rotation.y = Math.PI; wh.add(lg); }
+        [a, b].forEach((V) => { // el traficante, un pelín hacia fuera de la esquina
+          const dl = dealerMesh(pt.type); dl.position.set(V.x + nx * 0.13, TOP, V.y + nz * 0.13); dl.rotation.y = ang + Math.PI; grp.add(dl);
+        });
         const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: pt.type === 'any' ? labelTex('3:1') : labelTex(RINFO[pt.type].e, '2:1'), transparent: true, depthTest: false, depthWrite: false }));
-        sp.renderOrder = 12; sp.position.set(sx + ox * 0.12, HY + 0.32, sz + oz * 0.12); sp.scale.set(0.56, 0.35, 1); grp.add(sp);
+        sp.renderOrder = 12; sp.position.set(mx + nx * 0.4, 0.62, mz + nz * 0.4); sp.scale.set(0.48, 0.3, 1); grp.add(sp);
         grp.userData.hex = pt.hex; this.root.add(grp); this.ports.push(grp); return;
       }
       if (this.theme !== 'barrio') [a, b].forEach((v) => {
@@ -1323,9 +1307,9 @@ export class Board3D {
       const P = pose(sh.e);
       if (m && (m.userData.lv || 1) !== (sh.lv || 1)) { this.root.remove(m); delete this.ships[sh.id]; m = null; } // mejorado: se cambia el modelo
       if (!m) {
-        m = shipMesh(colors[sh.p], sh.lv || 1); m.userData = { e: sh.e, base: P, lv: sh.lv || 1 }; m.position.set(P.x, -0.06, P.z); m.rotation.y = P.ry;
+        m = shipMesh(colors[sh.p], sh.lv || 1); m.userData = { e: sh.e, base: P, lv: sh.lv || 1 }; m.position.set(P.x, this.theme === 'barrio' ? TOP : -0.06, P.z); m.rotation.y = P.ry;
         this.root.add(m); this.ships[sh.id] = m;
-        if (this.ready) { m.position.y = 0.8; this.tween(0.8, (k) => { m.position.y = -0.06 + (1 - k) * (1 - k) * 0.86; }); }
+        if (this.ready) { const y0 = m.position.y; m.position.y = 0.8; this.tween(0.8, (k) => { m.position.y = y0 + (1 - k) * (1 - k) * (0.8 - y0); }); }
       } else if (m.userData.e !== sh.e) {
         const from = m.userData.base, ry0 = m.rotation.y; let dr = P.ry - ry0; while (dr > Math.PI / 2) dr -= Math.PI; while (dr < -Math.PI / 2) dr += Math.PI;
         m.userData.e = sh.e; m.userData.base = P;
@@ -1627,12 +1611,12 @@ export class Board3D {
       const E = B.edges[id], a = B.verts[E.v[0]], b = B.verts[E.v[1]], s = on('e', id);
       const len = Math.hypot(b.x - a.x, b.y - a.y) * 0.62, ang = -Math.atan2(b.y - a.y, b.x - a.x);
       const isShip = kind === 'ship' || shipE.has(id);
-      const seaEdge = E.hexes.every((h) => B.hexes[h].res === 'sea'), ey = isShip || seaEdge ? 0.0 : TOP + 0.05;
+      const seaEdge = E.hexes.every((h) => B.hexes[h].res === 'sea'), ey = (isShip || seaEdge) && this.theme !== 'barrio' ? 0.0 : TOP + 0.05;
       const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, s ? 0.09 : 0.06), mk(isShip ? '#bfe9ff' : '#ffffff', s));
       if (opt.glow && !s) for (const k of [0.3, 0.5, 0.7]) this.markers.add(this.halo(a.x + (b.x - a.x) * k, ey + 0.08, a.y + (b.y - a.y) * k, isShip ? '#7fd3ff' : '#ffffff', 0.55)); bar.position.set((a.x + b.x) / 2, ey, (a.y + b.y) / 2); bar.rotation.y = ang; bar.renderOrder = 5;
       if (!s) bar.userData.pulse = true;
       const hit = new THREE.Mesh(new THREE.BoxGeometry(len, 0.2, 0.32), hitMat); hit.position.copy(bar.position); hit.rotation.y = ang; hit.userData = { k: 'e', id };
-      if (s) { const ghost = isShip ? shipMesh(color) : roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, isShip ? -0.06 : TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
+      if (s) { const ghost = isShip ? shipMesh(color) : roadMesh(color, len * 1.03); ghost.position.set((a.x + b.x) / 2, isShip && this.theme !== 'barrio' ? -0.06 : TOP, (a.y + b.y) / 2); ghost.rotation.y = ang; this.markers.add(ghost); }
       this.markers.add(bar, hit); this.hits.push(hit);
     });
     T.h.forEach((id) => {
@@ -1804,6 +1788,10 @@ function barrioWalls(res) {
   }
   const m = merged(L, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true })); m.castShadow = true; return m;
 }
+function barrioGroundGeo(x, z, lot) {
+  const L = [paint(G_CYL6, '#3a3a40', M(x, TOP - 0.01, z, 1.0, 0.02, 1.0)), paint(G_CYL6, '#b9b6ad', M(x, TOP + 0.002, z, 0.86, 0.016, 0.86)), paint(G_CYL6, lot, M(x, TOP + 0.006, z, WAP / 0.866, 0.016, WAP / 0.866))];
+  return mergeGeometries(L);
+}
 function barrioGround(res) {
   const L = [];
   L.push(paint(G_CYL6, '#3a3a40', M(0, TOP - 0.01, 0, 1.0, 0.02, 1.0)));
@@ -1896,6 +1884,46 @@ function graffitiTex(color, style) {
     c.fillStyle = color; for (let i = 0; i < 6; i++) { const x = 30 + Math.random() * (W - 60); c.fillRect(x, H - 14, 3, 4 + Math.random() * 10); } // gotas
     c.globalAlpha = 0.9; c.fillStyle = '#fff'; c.beginPath(); c.arc(W - 40, 18, 5, 0, 7); c.fill(); // brillo
   });
+}
+// logo del traficante pintado con spray en la pared del almacén
+function logoTex(r) {
+  const img = iconImg(RINFO[r].e), col = RINFO[r].c;
+  return iconCanvasTex(256, 256, img, (c, W, H) => {
+    c.clearRect(0, 0, W, H); c.fillStyle = col; c.globalAlpha = 0.95; c.beginPath();
+    for (let i = 0; i <= 28; i++) { const a = (i / 28) * Math.PI * 2, rr = 100 + Math.sin(i * 2.7) * 10 + (i % 3 ? 0 : 12); c.lineTo(W / 2 + Math.cos(a) * rr, H / 2 + Math.sin(a) * rr * 0.92); } c.fill();
+    for (let i = 0; i < 6; i++) { const x = 70 + i * 24 + Math.sin(i) * 6; c.fillRect(x, 200, 7, 20 + (i % 3) * 14); c.beginPath(); c.arc(x + 3.5, 222 + (i % 3) * 14, 5, 0, 7); c.fill(); } // gotas
+    c.globalAlpha = 1; c.lineWidth = 10; c.strokeStyle = '#111'; c.beginPath(); c.arc(W / 2, H / 2, 82, 0, 7); c.stroke();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(W / 2, H / 2, 77, 0, 7); c.fill();
+    if (img && img.complete && img.naturalWidth) c.drawImage(img, W / 2 - 64, H / 2 - 64, 128, 128);
+  });
+}
+// traficante: encapuchado con lo suyo bien a la vista
+function dealerMesh(type) {
+  const g = new THREE.Group(), s = 2.1, w = walkerMesh('#1d1d22', null); w.scale.setScalar(s); g.add(w);
+  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), new THREE.MeshStandardMaterial({ color: '#1d1d22' })); hood.scale.setScalar(s); hood.position.y = 0.095 * s; g.add(hood);
+  const std = (c, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.6 }, o));
+  if (type === 'brick') { // AK-47 cruzada
+    const ak = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.022, 0.016), std('#2a2a2a')); ak.add(body);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.016), std('#7a4a22')); stock.position.x = -0.12; ak.add(stock);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.05, 0.014), std('#2a2a2a')); mag.position.set(0.02, -0.03, 0); mag.rotation.z = 0.35; ak.add(mag);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 0.016), std('#7a4a22')); grip.position.x = 0.07; ak.add(grip);
+    ak.position.set(0, 0.13, 0.045); ak.rotation.set(0, 0, 0.6); g.add(ak);
+  } else if (type === 'sheep') { // bolsitas verdes
+    for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.035, 0.012), std('#4caf50', { roughness: 0.3 })); b.position.set(i < 2 ? 0.05 : -0.05, 0.09 + (i % 2) * 0.035, 0.03); g.add(b); }
+    const bag = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), std('#2e7d32')); bag.position.set(0.07, 0.03, 0.03); g.add(bag);
+  } else if (type === 'wheat') { // saco a la espalda con el dólar
+    const sack = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10), std('#c8a24a', { roughness: 0.9 })); sack.position.set(0, 0.17, -0.05); g.add(sack);
+    const dol = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.07), new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, map: canvasTex(128, 128, (c) => { c.font = '900 110px Arial Black, Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#1b5e20'; c.fillText('$', 64, 70); }) })); dol.position.set(0, 0.17, -0.112); dol.rotation.y = Math.PI; g.add(dol);
+  } else if (type === 'ore') { // cadenón de oro y un pedrusco en la mano
+    const ch = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.009, 8, 20), std('#ffd23f', { metalness: 0.95, roughness: 0.2 })); ch.position.set(0, 0.15, 0.03); ch.rotation.x = 1.2; g.add(ch);
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.032, 0), std('#7fe3ff', { metalness: 0.3, roughness: 0.05, emissive: '#2a8fb0', emissiveIntensity: 0.6 })); gem.position.set(0.07, 0.16, 0.03); gem.scale.y = 1.3; g.add(gem);
+  } else if (type === 'wood') { // un bote de spray en cada mano
+    ['#ff4f8b', '#3ec1d3'].forEach((c, i) => { const can = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.06, 10), std(c, { metalness: 0.4, roughness: 0.3 })); can.position.set(i ? -0.06 : 0.06, 0.1, 0.03); g.add(can); });
+  } else { // trato general: bolsa de deporte
+    const duf = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.1, 12), std('#333')); duf.rotation.z = Math.PI / 2; duf.position.set(0.08, 0.04, 0.02); g.add(duf);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
 }
 // vagón del tren elevado
 function trainCar(head) {
