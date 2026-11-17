@@ -239,7 +239,7 @@ mapHost.style.cssText = 'position:absolute;inset:0';
 let b3 = null, prevRev = {};
 function ensure3D() {
   if (!b3) {
-    b3 = new Board3D(mapHost, { mobile: true });
+    b3 = new Board3D(mapHost, { mobile: true, onLost: () => setTimeout(() => location.reload(), 600) }); // si iOS le quita la gráfica, recargamos (la partida sigue: volvemos a entrar con el mismo token)
     b3.onPick = (sel) => { U.sel = optionsFor(sel).length ? sel : null; U.panel = null; render(); };
     b3.onMiss = () => { if (U.sel || U.panel) { U.sel = null; U.panel = null; render(); } };
   }
@@ -373,8 +373,8 @@ function actionHTML() {
 }
 function handHTML() {
   const P = U.G.players[U.me], n = sumRes(P.res);
-  const cards = RES.filter((r) => P.res[r]).map((r) => cardHTML(r, { size: 'sm', n: P.res[r] })).join('');
-  const devs = P.dev.map((d) => devCardHTML(d.t, { size: 'sm' })).join('');
+  const cards = RES.filter((r) => P.res[r]).map((r) => cardHTML(r, { size: 'md', n: P.res[r] })).join('');
+  const devs = P.dev.map((d) => devCardHTML(d.t, { size: 'md' })).join('');
   return `<button id="hand" data-a="hand">${cards || (devs ? '' : '<span class="empty">Sin cartas</span>')}${cards && devs ? '<span class="gap"></span>' : ''}${devs}${n ? `<span class="tot">${n}</span>` : ''}</button>`;
 }
 function handOpenHTML() {

@@ -651,8 +651,10 @@ export class Board3D {
   constructor(el, opts = {}) {
     this.el = el; this.mobile = !!opts.mobile;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 2 : 2));
-    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1.5 : 2)); // en el móvil, menos píxeles: menos memoria y menos calor
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = this.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    // si el sistema le quita la gráfica a la página (pasa en iPhone con poca memoria), recargamos en vez de quedarnos congelados
+    this.renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; if (opts.onLost) opts.onLost(); });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 0.95;
     el.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.display = 'block'; this.renderer.domElement.style.touchAction = 'none';
@@ -693,6 +695,8 @@ export class Board3D {
     this.renderer.setAnimationLoop(() => this.tick());
     if (this.mobile) this.bindPicking();
   }
+  // apaga del todo este tablero (libera la gráfica): se usa cuando el móvil hace de anfitrión y el tablero lo pinta el mando
+  sleep() { this.setActive(false); try { this.renderer.dispose(); this.renderer.forceContextLoss(); this.renderer.domElement.remove(); } catch (e) { /* ya estaba apagado */ } }
   setActive(on) { if (on === this.active) return; this.active = on; this.renderer.setAnimationLoop(on ? () => this.tick() : null); if (on) { this.clock.getDelta(); this.resize(); } }
   resize() {
     const w = this.el.clientWidth || innerWidth, h = this.el.clientHeight || innerHeight;

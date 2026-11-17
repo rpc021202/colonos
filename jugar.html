@@ -66,7 +66,7 @@ body{min-height:100dvh}
 .ib .dot.o{background:var(--accent)}
 #act{right:calc(10px + var(--sar,env(safe-area-inset-right)));bottom:calc(12px + var(--sab,env(safe-area-inset-bottom)));background:var(--accent);color:#fff;border-radius:18px;padding:13px 18px;font-weight:700;font-size:16px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
 #act.roll{background:#2f8f4e;font-size:18px;padding:15px 22px}
-#hand{left:50%;bottom:-34px;transform:translateX(-50%);display:flex;align-items:flex-end;background:none;padding:0 0 0 14px;box-shadow:none;border-radius:0}
+#hand{left:50%;bottom:calc(-30px + var(--sab,env(safe-area-inset-bottom)));transform:translateX(-50%);display:flex;align-items:flex-end;background:none;padding:0 0 0 14px;box-shadow:none;border-radius:0}
 #hand:active{transform:translateX(-50%) scale(.98)}
 /* cartas como las de la caja */
 .ck{--w:62px;position:relative;width:var(--w);height:calc(var(--w)*1.4);border-radius:calc(var(--w)*.13);background:#f7eed6;border:2px solid #fff;box-shadow:0 5px 14px rgba(0,0,0,.35),inset 0 0 0 2px #d8c69c;display:flex;flex-direction:column;align-items:center;padding:calc(var(--w)*.08) calc(var(--w)*.08) calc(var(--w)*.05);color:#2b2118;font-weight:700;text-align:center;flex:none;transition:transform .18s,box-shadow .18s}

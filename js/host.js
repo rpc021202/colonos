@@ -12,7 +12,9 @@ import { sound } from './audio.js';
 const $ = (s) => document.querySelector(s);
 const SAVE = 'colonos-host-v1';
 const LOCAL = new URLSearchParams(location.search).has('local');
-const board = new Board3D($('#scene'));
+let board = new Board3D($('#scene'));
+// tablero de mentira cuando el propio móvil es el anfitrión: el 3D lo pinta el mando y así no hay dos tableros gastando memoria
+const NOBOARD = new Proxy({}, { get: (t, k) => (k === 'worldToScreen' ? () => ({ x: 0, y: 0 }) : ['ready', 'followTurn', 'mobile', 'userMoved'].includes(k) ? false : () => {}), set: () => true });
 
 const PHONE = matchMedia('(pointer:coarse)').matches && Math.min(window.screen.width, window.screen.height) < 700;
 let cfg = { self: false, theme: 'classic', players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
@@ -382,7 +384,7 @@ let selfFrame = null, wakeLock = null;
 async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
 function mountSelf() {
   if (selfFrame) return;
-  board.setActive(false); $('#scene').style.display = 'none';
+  board.sleep(); board = NOBOARD; $('#scene').style.display = 'none';
   sound.musicOn = false; sound.sfxOn = false; if (sound.musicBus) { sound.musicBus.gain.value = 0; sound.sfxBus.gain.value = 0; } // el sonido lo pone el mando
   const u = new URL(joinURL()); u.searchParams.set('embed', '1');
   selfFrame = document.createElement('iframe');
