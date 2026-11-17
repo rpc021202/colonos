@@ -1,5 +1,5 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
-import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats, winnerSpots } from './engine.js';
+import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, landPlan, DENSITIES, COLORS, actor, pn, esc, vp, total, stats, winnerSpots } from './engine.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
 import { THEMES, applyTheme, richText } from './themes.js';
 import { RINFO } from './engine.js';
@@ -61,12 +61,11 @@ function tokenToPid(token) { return lobby.findIndex((p) => p.token === token); }
 /* ---------- vista previa del mapa ---------- */
 let previewKey = '';
 function preview() {
-  const N = hexCountFor(cfg.players, cfg.density);
+  const LP = landPlan(cfg.players, cfg.density, cfg.mode === 'ships'), N = LP.N;
   const k = N + '-' + cfg.mode + '-' + cfg.islands + '-' + cfg.theme;
   if (k === previewKey) return;
   previewKey = k;
-  const mainN = hexCountFor(cfg.players, 'war');
-  board.setBoard(genBoard(cfg.mode === 'ships' ? Math.max(N, mainN + 6) : N, { ships: cfg.mode === 'ships', mainN, islands: cfg.islands }), { fog: false, theme: cfg.theme });
+  board.setBoard(genBoard(N, { ships: cfg.mode === 'ships', mainN: LP.mainN, islands: cfg.islands }), { fog: false, theme: cfg.theme });
   board.spin(true);
 }
 
@@ -96,7 +95,7 @@ function render() {
       <div class="note">${THEMES[cfg.theme].note} Las reglas son las mismas.</div>
       <label class="lbl">¿Cuántos vais a jugar?</label>${seg('players', [2, 3, 4, 5, 6, 7, 8].map((n) => [n, n]))}
       <label class="lbl">Tamaño del mapa</label>
-      <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${hexCountFor(cfg.players, d.k)}</span><b>${d.n}</b><span>${d.note} · ${d.d} por jugador</span></button>`).join('')}</div>
+      <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${landPlan(cfg.players, d.k, cfg.mode === 'ships').N}</span><b>${d.n}</b><span>${cfg.mode === 'ships' ? `isla de ${landPlan(cfg.players, d.k, true).mainN} + ${landPlan(cfg.players, d.k, true).isl} en islas` : `${d.note} · ${d.d} por jugador`}</span></button>`).join('')}</div>
       <div class="note">El original son 19 hexágonos para 4 (4,75 por jugador): por debajo de eso no bajamos. Si al final os unís más o menos, se mantiene el espacio por jugador.</div>
       <label class="lbl">Modo de juego</label>${seg('mode', [['classic', '🏝️ Clásico'], ['ships', '⛵ Barcos e islas']])}
       ${cfg.mode === 'ships' ? `<div class="note">La isla principal tiene el tamaño del tablero original y todo el espacio extra se reparte en islas. Los barcos (🌲+🐑) salen de tus poblados de costa y avanzan 1 tramo gratis por turno. Descubrir tierra da un recurso y la primera colonia en cada isla nueva, +1 punto. Hay cartas de Pirata.</div>
@@ -122,7 +121,7 @@ function render() {
       <label class="lbl">Jugadores (${lobby.length}/8)</label>
       <div class="plist">${lobby.length ? lobby.map((p, i) => `<div class="prow"><span class="chip" style="background:${p.color}"></span>${esc(p.name)}${p.bot ? ` <small>🤖 bot</small><button class="ghost" style="margin-left:6px;padding:2px 9px" data-a="rmbot" data-t="${p.token}">✕</button>` : i === 0 ? ' <small>anfitrión</small>' : ''}${p.online || p.bot ? '' : ' <small>desconectado</small>'}</div>`).join('') : '<div class="empty">Esperando a que se una alguien…</div>'}</div>
       <button class="ghost" data-a="addbot" ${lobby.length >= 8 ? 'disabled' : ''}>🤖 Añadir un bot</button>
-      <div class="note">${cfg.mode === 'ships' ? '⛵ Barcos e islas · ' : ''}Tierra: ${hexCountFor(Math.max(2, lobby.length || cfg.players), cfg.density)} hexágonos · ${cfg.fog ? 'a ciegas' : 'visible'} · ${cfg.target} puntos${cfg.openHands ? ' · recursos a la vista' : ''}</div>
+      <div class="note">${cfg.mode === 'ships' ? '⛵ Barcos e islas · ' : ''}Tierra: ${landPlan(Math.max(2, lobby.length || cfg.players), cfg.density, cfg.mode === 'ships').N} hexágonos · ${cfg.fog ? 'a ciegas' : 'visible'} · ${cfg.target} puntos${cfg.openHands ? ' · recursos a la vista' : ''}</div>
       <button class="primary big" data-a="go" ${lobby.length >= 2 ? '' : 'disabled'}>Empezar partida${lobby.length ? ` (${lobby.length})` : ''}</button>
       <button class="ghost" data-a="cfgback" style="margin-top:8px">Cambiar ajustes</button>
     </div>`;
@@ -231,7 +230,7 @@ async function onReplaced() {
 }
 function send(cid, m) { room && room.send(cid, m); }
 function broadcastLobby() {
-  for (const [cid, tok] of conns) send(cid, { t: 'lobby', you: tokenToPid(tok), players: lobby.map((p) => ({ name: p.name, color: p.color })), cfg: { fog: cfg.fog, ships: cfg.mode === 'ships', target: cfg.target, N: hexCountFor(Math.max(2, lobby.length), cfg.density) } });
+  for (const [cid, tok] of conns) send(cid, { t: 'lobby', you: tokenToPid(tok), players: lobby.map((p) => ({ name: p.name, color: p.color })), cfg: { fog: cfg.fog, ships: cfg.mode === 'ships', target: cfg.target, N: landPlan(Math.max(2, lobby.length), cfg.density, cfg.mode === 'ships').N } });
   render();
 }
 function broadcastState() {

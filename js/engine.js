@@ -41,15 +41,24 @@ export const COLORS = [
   { k: 'brown', n: 'Marrón', c: '#8d5a3b' }, { k: 'teal', n: 'Turquesa', c: '#00acc1' },
 ];
 // Espacio por jugador. "Guerra" = proporción del tablero original (19 hexágonos / 4 jugadores).
+// min: tamaño mínimo aunque seáis pocos (así con 2 o 3 también se puede elegir tablero más grande)
+// isl: tierra extra en islas (modo barcos), en proporción a la isla principal
 export const DENSITIES = [
-  { k: 'war', n: 'Guerra', d: 4.75, note: 'Como el original: poco sitio, mucha pelea' },
-  { k: 'normal', n: 'Normal', d: 6, note: 'Recomendado' },
-  { k: 'roomy', n: 'Holgado', d: 7.5, note: 'Partida relajada' },
-  { k: 'huge', n: 'Enorme', d: 9.5, note: 'Partida larga, mucho por explorar' },
+  { k: 'war', n: 'Guerra', d: 4.75, min: 19, isl: 0.4, note: 'Como el original: poco sitio, mucha pelea' },
+  { k: 'normal', n: 'Normal', d: 6, min: 23, isl: 0.65, note: 'Recomendado' },
+  { k: 'roomy', n: 'Holgado', d: 7.5, min: 28, isl: 0.95, note: 'Partida relajada' },
+  { k: 'huge', n: 'Enorme', d: 9.5, min: 34, isl: 1.35, note: 'Partida larga, mucho por explorar' },
 ];
 export function hexCountFor(players, densKey) {
-  const d = (DENSITIES.find((x) => x.k === densKey) || DENSITIES[1]).d;
-  return Math.max(19, Math.ceil(players * d));
+  const D = DENSITIES.find((x) => x.k === densKey) || DENSITIES[1];
+  return Math.max(D.min, Math.ceil(players * D.d));
+}
+// reparto de tierra: en modo barcos la isla principal es como el tablero original y el tamaño elegido decide cuántas islas hay
+export function landPlan(players, densKey, ships) {
+  if (!ships) return { N: hexCountFor(players, densKey), mainN: null, isl: 0 };
+  const D = DENSITIES.find((x) => x.k === densKey) || DENSITIES[1];
+  const mainN = Math.max(19, Math.ceil(players * 4.75)), isl = Math.max(6, Math.round(mainN * D.isl));
+  return { N: mainN + isl, mainN, isl };
 }
 
 export const rnd = (n) => Math.floor(Math.random() * n);
@@ -253,11 +262,7 @@ function orderCoast(coast, verts) {
 export function newGame(opts) {
   // opts: {players:[{name,color}], density, fog, target, sbp}
   const np = opts.players.length;
-  let N = hexCountFor(np, opts.density), mainN;
-  if (opts.ships) { // la isla principal es el tablero original; todo el extra se reparte en islas
-    mainN = hexCountFor(np, 'war');
-    N = Math.max(N, mainN + 6);
-  }
+  const { N, mainN } = landPlan(np, opts.density, !!opts.ships); // en barcos: isla principal como el original + islas según el tamaño
   const board = genBoard(N, { ships: !!opts.ships, mainN, islands: opts.islands || 'small' });
   const f = Math.max(1, np / 4);
   const devCounts = { knight: Math.round(14 * f), vp: 5 + Math.max(0, np - 6), road: Math.round(2 * f), plenty: Math.round(2 * f), mono: Math.round(2 * f) };
