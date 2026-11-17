@@ -80,7 +80,7 @@ function lostBanner() {
   const bad = U.status !== 'open' && U.screen !== 'join';
   if (!bad) { lostSince = 0; clearTimeout(lostTimer); lostTimer = null; $('#lost') && $('#lost').remove(); return; }
   if (!lostSince) lostSince = Date.now();
-  if (Date.now() - lostSince > 5000) { if (!$('#lost')) document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando<span class="dots"></span></div>`); }
+  if (Date.now() - lostSince > 5000) { if (!$('#lost')) { document.body.insertAdjacentHTML('beforeend', `<div class="lost" id="lost">Reconectando<span class="dots"></span><small>Toca para reintentar</small></div>`); $('#lost').onclick = () => { const d = net && net.diag ? net.diag() : null; if (net && net.retry) net.retry(); toast(d ? `Reintentando… (${d.url.split('/')[2].split(':')[0]}, intento ${d.tries}${d.err ? ', ' + d.err : ''}, sin datos hace ${d.secs} s)` : 'Reintentando…'); }; } }
   else if (!lostTimer) lostTimer = setTimeout(() => { lostTimer = null; lostBanner(); }, 5200);
 }
 function connect() {
@@ -111,17 +111,21 @@ function hostEvent(m) {
 }
 async function takeOver() {
   electT = null;
-  if (relay || !U.hostGone || document.hidden) return;
+  if (relay || !U.hostGone) return;
+  if (document.hidden) { retryTake(); return; }
   // si la partida nos sigue contestando, no se había ido (era un corte momentáneo)
   if (net.lastIn() > U.goneAt + 500) { U.hostGone = false; render(); return; }
   const saved = await unpack(await net.saved());
   if (!U.hostGone || relay) return; // otro se ha adelantado
-  if (!saved || !saved.G || saved.code !== U.code) { toast('No encuentro la copia de la partida'); return; }
+  if (!saved || !saved.G || saved.code !== U.code) { toast('No encuentro la copia de la partida, reintento…'); retryTake(); return; }
   try {
     relay = await startRelay(U.code, net.url, saved, () => { relay = null; render(); });
     toast('🔁 Tu móvil lleva ahora la partida'); keepAwake();
-  } catch (e) { relay = null; }
+  } catch (e) { relay = null; toast('No he podido coger la partida, reintento…'); retryTake(); }
   render();
+}
+// si el relevo falla (sin conexión, copia que no llega…), se vuelve a intentar mientras siga faltando quien lleve la partida
+function retryTake() { clearTimeout(electT); electT = setTimeout(() => { if (U.hostGone && !relay) takeOver(); }, 6000);
 }
 function onMsg(m) {
   switch (m.t) {

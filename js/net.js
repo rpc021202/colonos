@@ -130,26 +130,31 @@ export function joinRoom(code, h, token) {
 function joinMqtt(code, h, token, url) {
   const base = 'colonos/v1/' + code, me = (token || uid()).replace(/[^a-z0-9]/gi, '').slice(0, 24) || uid();
   const state = (s) => h.onStatus && h.onStatus(s);
-  let c = null, closed = false, lastIn = Date.now(), hostEpoch = 0;
+  let c = null, closed = false, lastIn = Date.now(), hostEpoch = 0, isOpen = false;
+  const diag = { tries: 0, err: '', since: Date.now() }; // para el aviso de «Reconectando» (qué está pasando)
   const savedWait = [];
   const pending = []; // mensajes enviados sin conexión: se mandan al reconectar
   function start() {
     if (closed) return;
-    lastStart = Date.now();
+    lastStart = Date.now(); diag.tries++; isOpen = false;
     if (c) { const old = c; c = null; try { old.end(true); } catch (e) {} }
     state('connecting');
     const cl = window.mqtt.connect(url, { clientId: 'colonos-c-' + me.slice(0, 12) + '-' + uid(), clean: true, reconnectPeriod: 1000, connectTimeout: 8000, keepalive: 10 });
     c = cl;
+    const opened = () => { // conectados de verdad: avisamos, mandamos lo pendiente y pedimos el estado
+      if (c !== cl || isOpen) return; isOpen = true; diag.tries = 0; diag.err = '';
+      lastIn = Date.now(); state('open');
+      while (pending.length) cl.publish(base + '/u/' + me, pending.shift(), { qos: 1 });
+      h.onOpen && h.onOpen();
+    };
     cl.on('connect', () => {
       if (c !== cl) return;
+      isOpen = false;
       cl.subscribe(base + '/h', { qos: 1 });
-      cl.subscribe(base + '/d/' + me, { qos: 1 }, () => {
-        if (c !== cl) return;
-        lastIn = Date.now(); state('open');
-        while (pending.length) cl.publish(base + '/u/' + me, pending.shift(), { qos: 1 });
-        h.onOpen && h.onOpen();
-      });
+      cl.subscribe(base + '/d/' + me, { qos: 1 }, opened);
+      setTimeout(() => { if (c === cl && cl.connected) opened(); }, 4000); // si el servidor no confirma la suscripción, seguimos igual
     });
+    cl.on('error', (e) => { diag.err = (e && (e.message || e.type)) || 'error'; });
     cl.on('message', (topic, payload) => {
       if (topic === base + '/g') { const txt = payload.toString(); savedWait.splice(0).forEach((r) => r(txt)); cl.unsubscribe(base + '/g'); return; }
       if (topic === base + '/h') {
@@ -160,11 +165,11 @@ function joinMqtt(code, h, token, url) {
         } catch (e) {}
         return;
       }
-      lastIn = Date.now(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {}
+      lastIn = Date.now(); if (!isOpen) opened(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {}
     });
-    cl.on('reconnect', () => { if (c === cl) state('connecting'); });
-    cl.on('offline', () => { if (c === cl) state('lost'); });
-    cl.on('close', () => { if (c === cl && !closed) state('lost'); });
+    cl.on('reconnect', () => { if (c === cl) { isOpen = false; diag.tries++; state('connecting'); } });
+    cl.on('offline', () => { if (c === cl) { isOpen = false; state('lost'); } });
+    cl.on('close', () => { if (c === cl && !closed) { isOpen = false; state('lost'); } });
   }
   const send = (data) => {
     const msg = JSON.stringify(data);
@@ -193,7 +198,8 @@ function joinMqtt(code, h, token, url) {
   start();
   return {
     send, close: () => { closed = true; try { c && c.end(true); } catch (e) {} },
-    url, relay: true, lastIn: () => lastIn,
+    url, relay: true, lastIn: () => lastIn, retry: () => start(),
+    diag: () => ({ ...diag, url, connected: !!(c && c.connected), secs: Math.round((Date.now() - lastIn) / 1000) }),
     saved: () => new Promise((res) => { savedWait.push(res); if (c && c.connected) c.subscribe(base + '/g', { qos: 1 }); setTimeout(() => res(null), 5000); }),
   };
 }
