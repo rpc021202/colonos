@@ -527,8 +527,8 @@ function cityMesh(color) {
   return withWindows(L);
 }
 // Camino: vigas + tablones sueltos (cada tablón cae por separado)
-function roadMesh(color, len) {
-  if (THEME === 'barrio') return streetClaimMesh(color, len);
+function roadMesh(color, len, p) {
+  if (THEME === 'barrio') return streetClaimMesh(color, len, NAMES[p]);
   const g = new THREE.Group(), base = [];
   base.push(paint(G_BOX, '#4e3726', M(0, 0.014, -0.048, len, 0.02, 0.016)));
   base.push(paint(G_BOX, '#4e3726', M(0, 0.014, 0.048, len, 0.02, 0.016)));
@@ -792,7 +792,7 @@ export class Board3D {
     // autovía elevada sobre pilares rodeando cada isla
     const coast = B.edges.filter((E) => E.hexes.filter(landH).length === 1);
     const deckMat = new THREE.MeshStandardMaterial({ color: '#6d6a66', roughness: 0.85 }), pilMat = new THREE.MeshStandardMaterial({ color: '#8a867f', roughness: 0.9 });
-    const HL = [], HY = 0.85, off = 0.6;
+    const HL = [], HY = 0.75, off = 0.6;
     const pts = {}; // punto de autovía de cada tramo de costa
     coast.forEach((E) => {
       const a = B.verts[E.v[0]], b = B.verts[E.v[1]], h = B.hexes[E.hexes.find(landH)];
@@ -814,17 +814,20 @@ export class Board3D {
       }
       if (ring.length > 3) this.rings.push(ring);
     });
-    // la autovía: un tramo continuo entre cada par de puntos del anillo, sobre pilares
-    this.rings.forEach((ring) => ring.forEach((p, i) => {
-      const q = ring[(i + 1) % ring.length], dx = q.x - p.x, dz = q.z - p.z, len = Math.hypot(dx, dz), ang = -Math.atan2(dz, dx), cx = (p.x + q.x) / 2, cz = (p.z + q.z) / 2, nx = -dz / len, nz = dx / len;
-      HL.push(paint(G_BOX, '#6d6a66', M(cx, HY, cz, len + 0.2, 0.06, 0.4, ang)));
-      HL.push(paint(G_BOX, '#b0aca4', M(cx + nx * 0.19, HY + 0.05, cz + nz * 0.19, len + 0.2, 0.05, 0.025, ang)));
-      HL.push(paint(G_BOX, '#b0aca4', M(cx - nx * 0.19, HY + 0.05, cz - nz * 0.19, len + 0.2, 0.05, 0.025, ang)));
-      HL.push(paint(G_BOX, '#f5f5f5', M(cx, HY + 0.032, cz, len * 0.45, 0.004, 0.012, ang)));
-      HL.push(paint(G_CYL8, '#8a867f', M(p.x, (HY - 0.1) / 2 - 0.05, p.z, 0.06, HY + 0.1, 0.06)));
-    }));
+    // tren elevado: viga fina con raíles sobre pilares delgados; en los traficantes hay parada (sin pilar, la escalera la sostiene)
+    const portE = new Set(B.ports.map((pt) => pt.e)); this.ringPt = pts;
+    this.rings.forEach((ring) => {
+      ring.forEach((p, i) => {
+        const q = ring[(i + 1) % ring.length], dx = q.x - p.x, dz = q.z - p.z, len = Math.hypot(dx, dz), ang = -Math.atan2(dz, dx), cx = (p.x + q.x) / 2, cz = (p.z + q.z) / 2, nx = -dz / len, nz = dx / len;
+        HL.push(paint(G_BOX, '#77736d', M(cx, HY, cz, len + 0.06, 0.05, 0.12, ang)));
+        HL.push(paint(G_BOX, '#3b3b3b', M(cx + nx * 0.035, HY + 0.031, cz + nz * 0.035, len + 0.06, 0.012, 0.012, ang)));
+        HL.push(paint(G_BOX, '#3b3b3b', M(cx - nx * 0.035, HY + 0.031, cz - nz * 0.035, len + 0.06, 0.012, 0.012, ang)));
+        if (!portE.has(p.e.id)) { HL.push(paint(G_CYL8, '#8a867f', M(p.x, (HY - 0.1) / 2 - 0.05, p.z, 0.035, HY + 0.1, 0.035))); HL.push(paint(G_BOX, '#8a867f', M(p.x, HY - 0.035, p.z, 0.05, 0.03, 0.16, ang))); }
+      });
+      let tot = 0; ring.cum = ring.map((p, i) => { const q = ring[(i + 1) % ring.length], d = Math.hypot(q.x - p.x, q.z - p.z), c0 = tot; tot += d; return c0; }); ring.tot = tot;
+    });
     if (HL.length) { const hw = merged(HL, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true })); this.root.add(hw); this.highway = hw; }
-    // tráfico: coches normales por las calles y por la autovía
+    // tráfico: coches normales por las calles
     const palette = ['#e53935', '#fdd835', '#43a047', '#1e88e5', '#ffffff', '#212121', '#8e24aa', '#ff7043', '#90a4ae'];
     this.traffic = [];
     const nodes = this.streetAdj.map((a, i) => (a.length ? i : -1)).filter((i) => i >= 0);
@@ -834,12 +837,17 @@ export class Board3D {
       const a = nodes[Math.floor(Math.random() * nodes.length)], b = this.streetAdj[a][0];
       this.traffic.push({ m: c, a, b, t: Math.random(), sp: rand(0.35, 0.6), road: true });
     }
+    // un tren por anillo, con paradas en los traficantes
     this.rings.forEach((ring) => {
-      for (let i = 0; i < Math.max(2, Math.round(ring.length / 6)); i++) {
-        const c = carBody(palette[(i * 3) % palette.length], 1); c.scale.setScalar(0.6); this.root.add(c);
-        this.traffic.push({ m: c, ring, i: Math.floor(Math.random() * ring.length), t: Math.random(), sp: rand(0.5, 0.9) * (i % 2 ? 1 : -1), lane: i % 2 ? 0.09 : -0.09 });
-      }
+      const cars = [0, 1, 2].map((k) => { const m = trainCar(k === 0); this.root.add(m); return m; });
+      const stops = ring.map((p, i) => (portE.has(p.e.id) ? ring.cum[i] + Math.hypot(ring[(i + 1) % ring.length].x - p.x, ring[(i + 1) % ring.length].z - p.z) * 0 : -1)).filter((x) => x >= 0);
+      this.traffic.push({ train: true, ring, cars, s: Math.random() * ring.tot, sp: 0.55, stops, wait: 0 });
     });
+  }
+  ringAt(R, s) {
+    s = ((s % R.tot) + R.tot) % R.tot; let i = 0; while (i < R.length - 1 && R.cum[i + 1] <= s) i++;
+    const p = R[i], q = R[(i + 1) % R.length], l = Math.hypot(q.x - p.x, q.z - p.z) || 1, t = (s - R.cum[i]) / l;
+    return { x: p.x + (q.x - p.x) * t, z: p.z + (q.z - p.z) * t, ang: -Math.atan2(q.z - p.z, q.x - p.x) };
   }
   animateTraffic(dt) {
     const B = this.B;
@@ -854,6 +862,14 @@ export class Board3D {
         const dx = (b.x - a.x) / len, dz = (b.y - a.y) / len;
         c.m.position.set(a.x + (b.x - a.x) * c.t - dz * 0.055, TOP + 0.005, a.y + (b.y - a.y) * c.t + dx * 0.055);
         c.m.rotation.y = -Math.atan2(dz, dx);
+      } else if (c.train) {
+        if (c.wait > 0) c.wait -= dt;
+        else {
+          const prev = c.s; c.s += c.sp * dt;
+          const hit = c.stops.find((st) => { const a = ((prev - st) % c.ring.tot + c.ring.tot) % c.ring.tot, b2 = ((c.s - st) % c.ring.tot + c.ring.tot) % c.ring.tot; return a > b2; });
+          if (hit !== undefined) { c.s = hit + 0.001; c.wait = 2.2; }
+        }
+        c.cars.forEach((m, k) => { const P = this.ringAt(c.ring, c.s - k * 0.27); m.position.set(P.x, 0.75 + 0.037, P.z); m.rotation.y = P.ang; });
       } else {
         const R = c.ring, n = R.length;
         c.t += c.sp * dt * 0.9;
@@ -944,13 +960,24 @@ export class Board3D {
     B.ports.forEach((pt) => {
       const e = B.edges[pt.e], a = B.verts[e.v[0]], b = B.verts[e.v[1]];
       const grp = new THREE.Group();
-      if (this.theme === 'barrio') { // traficante: furgoneta entreabierta y un encapuchado
-        const hx = B.hexes[pt.hex], dx = pt.x - hx.x, dz = pt.y - hx.y, l = Math.hypot(dx, dz) || 1, ang = Math.atan2(dx, dz);
-        const van = dealerVan(pt.type === 'any' ? '#9e9e9e' : RINFO[pt.type].c); van.position.set(pt.x + (dz / l) * 0.12, 0, pt.y - (dx / l) * 0.12); van.rotation.y = ang + Math.PI / 2; grp.add(van);
-        const guy = walkerMesh('#1d1d22', null); guy.scale.setScalar(2.1); guy.position.set(pt.x - (dz / l) * 0.12 + (dx / l) * 0.05, -0.1, pt.y + (dx / l) * 0.12 + (dz / l) * 0.05); guy.rotation.y = ang + Math.PI; grp.add(guy);
+      if (this.theme === 'barrio') { // parada del tren: andén, escalera de caracol y el traficante debajo con su furgoneta
+        const hx = B.hexes[pt.hex], rp = (this.ringPt || {})[pt.e] || { x: pt.x, z: pt.y };
+        let ox = rp.x - hx.x, oz = rp.z - hx.y; const ol = Math.hypot(ox, oz) || 1; ox /= ol; oz /= ol; const ang = Math.atan2(ox, oz), HY = 0.75;
+        const L = [];
+        B_(L, '#9a958d', rp.x + ox * 0.13, HY - 0.005, rp.z + oz * 0.13, 0.46, 0.025, 0.15); // andén (alineado con la vía)
+        L.forEach((m) => m.applyMatrix4(new THREE.Matrix4().makeTranslation(-(rp.x + ox * 0.13), 0, -(rp.z + oz * 0.13))));
+        const plat = merged(L, MAT_()); plat.position.set(rp.x + ox * 0.13, 0, rp.z + oz * 0.13); plat.rotation.y = ang; grp.add(plat);
+        const sx = rp.x + ox * 0.3, sz = rp.z + oz * 0.3, S = [];
+        S.push(paint(G_CYL8, '#6f6c67', M(sx, (HY + 0.1) / 2 - 0.1, sz, 0.02, HY + 0.1, 0.02)));
+        for (let k = 0; k < 14; k++) { const a2 = k * 0.62, yy = -0.08 + (k + 1) * (HY + 0.07) / 14; S.push(paint(G_BOX, '#c8c3ba', M(sx + Math.sin(a2) * 0.05, yy, sz + Math.cos(a2) * 0.05, 0.1, 0.01, 0.045, a2 + Math.PI / 2))); }
+        S.push(paint(G_BOX, '#c8c3ba', M(rp.x + ox * 0.22, HY - 0.005, rp.z + oz * 0.22, 0.12, 0.02, 0.12, -ang)));
+        grp.add(merged(S, MAT_()));
+        const px = -oz, pz = ox; // a un lado de la escalera, la furgoneta; debajo, el encapuchado
+        const van = dealerVan(pt.type === 'any' ? '#9e9e9e' : RINFO[pt.type].c); van.position.set(sx + px * 0.22 + ox * 0.05, 0, sz + pz * 0.22 + oz * 0.05); van.rotation.y = ang; grp.add(van);
+        const guy = walkerMesh('#1d1d22', null); guy.scale.setScalar(2.1); guy.position.set(sx + ox * 0.1, -0.1, sz + oz * 0.1); guy.rotation.y = ang + Math.PI; grp.add(guy);
         const hood = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), new THREE.MeshStandardMaterial({ color: '#1d1d22' })); hood.scale.setScalar(2.1); hood.position.set(guy.position.x, -0.1 + 0.095 * 2.1, guy.position.z); grp.add(hood);
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: pt.type === 'any' ? labelTex('3:1') : labelTex(RINFO[pt.type].e, '2:1'), transparent: true }));
-        sp.position.set(pt.x, 0.55, pt.y); sp.scale.set(0.6, 0.375, 1); grp.add(sp);
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: pt.type === 'any' ? labelTex('3:1') : labelTex(RINFO[pt.type].e, '2:1'), transparent: true, depthTest: false, depthWrite: false }));
+        sp.renderOrder = 12; sp.position.set(sx + ox * 0.12, HY + 0.32, sz + oz * 0.12); sp.scale.set(0.56, 0.35, 1); grp.add(sp);
         grp.userData.hex = pt.hex; this.root.add(grp); this.ports.push(grp); return;
       }
       if (this.theme !== 'barrio') [a, b].forEach((v) => {
@@ -1135,6 +1162,7 @@ export class Board3D {
     for (const k in this.ships) if (!seen.has(+k)) { this.root.remove(this.ships[k]); delete this.ships[k]; }
   }
   syncPieces(s, colors) {
+    NAMES = (s.players || []).map((q) => q.name);
     if (s.ships) this.syncShips(s.ships, colors);
     const B = this.B, seenV = new Set(), seenE = new Set();
     s.buildings.forEach(([v, p, t]) => {
@@ -1151,7 +1179,7 @@ export class Board3D {
       seenE.add(e);
       if (this.pieces.e[e]) return;
       const E = B.edges[e], a = B.verts[E.v[0]], b = B.verts[E.v[1]];
-      const m = roadMesh(colors[p], Math.hypot(b.x - a.x, b.y - a.y) * 0.64);
+      const m = roadMesh(colors[p], Math.hypot(b.x - a.x, b.y - a.y) * 0.64, p);
       m.position.set((a.x + b.x) / 2, TOP, (a.y + b.y) / 2); m.rotation.y = -Math.atan2(b.y - a.y, b.x - a.x);
       this.root.add(m); this.pieces.e[e] = m; this.drop(m, true);
     });
@@ -1558,7 +1586,7 @@ function mansionMesh(color) {
   g.add(withWindows(L)); return g;
 }
 // calle conquistada: grafiti en el suelo y en un muro + dos colegas de la banda en la esquina
-function streetClaimMesh(color, len) {
+function streetClaimMesh(color, len, name) {
   const g = new THREE.Group();
   const tagTex = canvasTex(256, 64, (c, W, H) => {
     c.fillStyle = 'rgba(0,0,0,0)'; c.clearRect(0, 0, W, H); c.lineWidth = 9; c.lineCap = 'round'; c.lineJoin = 'round';
@@ -1573,17 +1601,38 @@ function streetClaimMesh(color, len) {
   });
   void wallTex;
   // grafiti pintado sobre los muros de las dos manzanas que dan a esta calle (mirando a la calle)
-  const style = Math.floor(Math.random() * GRAFF.length);
+  const seed = Math.floor(Math.random() * 99), capM = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
   [1, -1].forEach((sd, k) => {
-    const tex = graffitiTex(color, (style + k) % GRAFF.length);
-    const pnl = new THREE.Mesh(new THREE.PlaneGeometry(0.78, WALL_H * 0.9), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }));
-    pnl.position.set(0, WALL_H / 2, sd * (0.866 - 0.7 - 0.014)); pnl.rotation.y = sd > 0 ? Math.PI : 0; g.add(pnl);
+    const tex = wallTagTex(color, name, seed + k);
+    const pnl = new THREE.Mesh(new THREE.PlaneGeometry(0.8, WALL_H), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }));
+    pnl.position.set(0, WALL_H / 2, sd * (0.866 - 0.712 - 0.002)); pnl.rotation.y = sd > 0 ? Math.PI : 0; g.add(pnl);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.012, 0.038), capM); cap.position.set(0, WALL_H + 0.012, sd * (0.866 - 0.7)); g.add(cap);
   });
   [-0.32, 0.32].forEach((x, i) => { const w = walkerMesh(color, null); w.scale.setScalar(1.7); w.position.set(x * len, 0.0, (i ? 1 : -1) * 0.135); w.rotation.y = i ? Math.PI - 0.5 : 0.5; w.userData.crew = true; g.add(w); });
   return g;
 }
-// letras de grafiti (tres estilos que se van turnando) en el color de la banda
+// letras de grafiti: tipografía Sedgwick Ave Display (OFL), en blanco con borde negro sobre la pared pintada del color de la banda
 const GRAFF = ['CREW', 'BARRIO', 'KINGZ'];
+let NAMES = [];
+try { const ff = new FontFace('Graff', 'url(fonts/graff.woff2)'); ff.load().then((f) => document.fonts.add(f)).catch(() => {}); } catch (e) { /* sin FontFace */ }
+function wallTagTex(color, name, seed) {
+  return canvasTex(512, 112, (c, W, H) => {
+    c.fillStyle = color; c.fillRect(0, 0, W, H);
+    // textura de spray: manchas más claras y oscuras
+    for (let i = 0; i < 40; i++) { c.globalAlpha = 0.08; c.fillStyle = i % 2 ? '#000' : '#fff'; c.beginPath(); c.arc(Math.random() * W, Math.random() * H, 8 + Math.random() * 26, 0, 7); c.fill(); }
+    c.globalAlpha = 1; c.fillStyle = color; for (let i = 0; i < 9; i++) { const x = Math.random() * W; c.fillRect(x, H - 6, 4, -(4 + Math.random() * 3)); c.fillRect(x, H - 2, 4, 2); }
+    const word = (name || 'CREW').replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 14) || 'CREW';
+    let fs = 92; c.font = `${fs}px Graff, Impact, Arial Black, sans-serif`;
+    while (c.measureText(word).width > W * 0.82 && fs > 30) { fs -= 4; c.font = `${fs}px Graff, Impact, Arial Black, sans-serif`; }
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+    c.save(); c.translate(W / 2, H / 2 + 4); c.rotate(((seed % 3) - 1) * 0.04);
+    c.lineWidth = 18; c.strokeStyle = '#000'; c.strokeText(word, 4, 5); // sombra
+    c.lineWidth = 12; c.strokeStyle = '#111'; c.strokeText(word, 0, 0);
+    c.fillStyle = '#fff'; c.fillText(word, 0, 0);
+    c.fillStyle = 'rgba(255,255,255,0.9)'; c.beginPath(); c.arc(c.measureText(word).width / 2 + 10, -fs * 0.32, 5, 0, 7); c.fill(); // brillo
+    c.restore();
+  });
+}
 function graffitiTex(color, style) {
   return canvasTex(512, 80, (c, W, H) => {
     c.clearRect(0, 0, W, H);
@@ -1598,6 +1647,15 @@ function graffitiTex(color, style) {
     c.fillStyle = color; for (let i = 0; i < 6; i++) { const x = 30 + Math.random() * (W - 60); c.fillRect(x, H - 14, 3, 4 + Math.random() * 10); } // gotas
     c.globalAlpha = 0.9; c.fillStyle = '#fff'; c.beginPath(); c.arc(W - 40, 18, 5, 0, 7); c.fill(); // brillo
   });
+}
+// vagón del tren elevado
+function trainCar(head) {
+  const g = new THREE.Group(), L = [];
+  B_(L, '#d9dde2', 0, 0.045, 0, 0.25, 0.08, 0.1); B_(L, '#e0b322', 0, 0.02, 0, 0.252, 0.014, 0.102);
+  B_(L, '#2b3440', 0, 0.06, 0, 0.21, 0.03, 0.103);
+  if (head) B_(L, '#2b3440', 0.124, 0.055, 0, 0.006, 0.04, 0.08);
+  g.add(merged(L, MAT_())); g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
 }
 // furgoneta del traficante: blanca, portón trasero abierto y cajas del color del recurso
 function dealerVan(col) {
