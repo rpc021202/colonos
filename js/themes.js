@@ -1,5 +1,6 @@
 // Temas (estéticas): las reglas no cambian; cambian nombres, iconos, cartas y la jerga de los avisos.
 import { RINFO, DEV, W } from './engine.js';
+import { sound } from './audio.js';
 
 const snap = (o) => JSON.parse(JSON.stringify(o));
 const BASE = { RINFO: snap(RINFO), DEV: snap(DEV), W: snap(W) };
@@ -50,6 +51,7 @@ export function applyTheme(key) {
   const T = THEMES[key] || THEMES.classic;
   if (T === theme) return T;
   theme = T; themeKey = THEMES[key] ? key : 'classic';
+  sound.setTheme(themeKey);
   for (const k in BASE.RINFO) Object.assign(RINFO[k], BASE.RINFO[k], (T.RINFO || {})[k] || {});
   for (const k in BASE.DEV) Object.assign(DEV[k], BASE.DEV[k], (T.DEV || {})[k] || {});
   Object.assign(W, BASE.W, T.W || {});

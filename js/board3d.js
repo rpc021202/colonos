@@ -1495,6 +1495,14 @@ export class Board3D {
   }
   drop(m, road) {
     if (!this.ready) return;
+    if (road && this.theme === 'barrio') { // la pared se va pintando a la vez que suena el spray
+      m.children.forEach((c) => {
+        const s0 = c.scale.x;
+        if (c.userData.paint) { c.scale.x = 0.001; this.tween(2.1, (k) => { c.scale.x = Math.max(0.001, Math.min(1, (k * 2.1 - 0.45) / 1.6)); }); }
+        else { c.scale.setScalar(0.01); this.tween(0.4, (k) => c.scale.setScalar(Math.max(0.01, s0 * k))); }
+      });
+      return;
+    }
     if (road) { // tablón a tablón
       m.children.forEach((c) => {
         if (c.userData.plank === undefined) { c.scale.setScalar(0.01); this.tween(0.25, (k) => c.scale.setScalar(Math.max(0.01, k))); return; }
@@ -1846,8 +1854,8 @@ function streetClaimMesh(color, len, name) {
   [1, -1].forEach((sd, k) => {
     const tex = wallTagTex(color, name, seed + k);
     const pnl = new THREE.Mesh(new THREE.PlaneGeometry((WAP + 0.012) * 1.1547, WALL_H), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }));
-    pnl.position.set(0, WALL_H / 2, sd * (0.866 - WAP - 0.014)); pnl.rotation.y = sd > 0 ? Math.PI : 0; g.add(pnl);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry((WAP + 0.012) * 1.1547, 0.012, 0.038), capM); cap.position.set(0, WALL_H + 0.012, sd * (0.866 - WAP)); g.add(cap);
+    pnl.position.set(0, WALL_H / 2, sd * (0.866 - WAP - 0.014)); pnl.rotation.y = sd > 0 ? Math.PI : 0; pnl.userData.paint = true; g.add(pnl);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry((WAP + 0.012) * 1.1547, 0.012, 0.038), capM); cap.position.set(0, WALL_H + 0.012, sd * (0.866 - WAP)); cap.userData.paint = true; g.add(cap);
   });
   [-0.32, 0.32].forEach((x, i) => { const w = walkerMesh(color, null); w.scale.setScalar(1.7); w.position.set(x * len, 0.0, (i ? 1 : -1) * 0.18); w.rotation.y = i ? Math.PI - 0.5 : 0.5; w.userData.crew = true; g.add(w); });
   return g;
