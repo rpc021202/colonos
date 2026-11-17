@@ -1,6 +1,8 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
 import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats, winnerSpots } from './engine.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
+import { THEMES, applyTheme } from './themes.js';
+import { RINFO } from './engine.js';
 document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}#win .card{max-height:92vh;overflow-y:auto}</style>`);
 import { Board3D } from './board3d.js';
 import { hostRoom, makeCode, linkParams, pack, unpack } from './net.js';
@@ -13,7 +15,7 @@ const LOCAL = new URLSearchParams(location.search).has('local');
 const board = new Board3D($('#scene'));
 
 const PHONE = matchMedia('(pointer:coarse)').matches && Math.min(window.screen.width, window.screen.height) < 700;
-let cfg = { self: false, players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
+let cfg = { self: false, theme: 'classic', players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
 let screen = 'start'; // start | config | lobby | game
 let room = null, code = null, G = null, staticB = null;
 let lobby = []; // {token,name,color,online}
@@ -60,11 +62,11 @@ function tokenToPid(token) { return lobby.findIndex((p) => p.token === token); }
 let previewKey = '';
 function preview() {
   const N = hexCountFor(cfg.players, cfg.density);
-  const k = N + '-' + cfg.mode + '-' + cfg.islands;
+  const k = N + '-' + cfg.mode + '-' + cfg.islands + '-' + cfg.theme;
   if (k === previewKey) return;
   previewKey = k;
   const mainN = hexCountFor(cfg.players, 'war');
-  board.setBoard(genBoard(cfg.mode === 'ships' ? Math.max(N, mainN + 6) : N, { ships: cfg.mode === 'ships', mainN, islands: cfg.islands }), { fog: false });
+  board.setBoard(genBoard(cfg.mode === 'ships' ? Math.max(N, mainN + 6) : N, { ships: cfg.mode === 'ships', mainN, islands: cfg.islands }), { fog: false, theme: cfg.theme });
   board.spin(true);
 }
 
@@ -90,6 +92,8 @@ function render() {
     const seg = (key, vals) => `<div class="seg">${vals.map(([v, l, dis]) => `<button class="${cfg[key] === v ? 'sel' : ''}" data-a="cfg" data-k="${key}" data-v="${v}" ${dis ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
     ui.innerHTML = `<div id="config"><div class="card">
       <h1>Nueva partida</h1><div class="sub">${cfg.self ? 'Juegas desde este dispositivo, que además lleva la partida. Después podrás pasar el código a los demás.' : 'Configura la partida. Después aparecerá el QR para unirse.'}</div>
+      <label class="lbl">Estética</label>${seg('theme', Object.entries(THEMES).map(([k, T]) => [k, T.icon + ' ' + T.name]))}
+      <div class="note">${THEMES[cfg.theme].note} Las reglas son las mismas.</div>
       <label class="lbl">¿Cuántos vais a jugar?</label>${seg('players', [2, 3, 4, 5, 6, 7, 8].map((n) => [n, n]))}
       <label class="lbl">Tamaño del mapa</label>
       <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${hexCountFor(cfg.players, d.k)}</span><b>${d.n}</b><span>${d.note} · ${d.d} por jugador</span></button>`).join('')}</div>
@@ -145,7 +149,7 @@ function renderHUD() {
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
-    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${RINFO[r].e}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
     ${diceHistHTML()}
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
@@ -158,7 +162,7 @@ function renderHUD() {
 }
 
 /* ---------- recursos volando y dados ---------- */
-const EMO = { wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' };
+const EMO = new Proxy({}, { get: (_, r) => (RINFO[r] || {}).e || '' }); // iconos del tema actual
 function flyResources(fx) {
   if (hudHidden) return;
   fx.forEach((f, i) => {
@@ -219,7 +223,7 @@ async function onReplaced() {
   const saved = await unpack(await room.saved());
   try { room.close(); } catch (e) {}
   room = null; conns.clear();
-  if (saved && saved.G) { G = saved.G; G.ev = []; lobby = saved.lobby.map((p) => ({ ...p, online: false })); cfg = { ...cfg, ...saved.cfg }; staticB = boardStatic(G); }
+  if (saved && saved.G) { G = saved.G; G.ev = []; applyTheme(G.opts.theme || 'classic'); lobby = saved.lobby.map((p) => ({ ...p, online: false })); cfg = { ...cfg, ...saved.cfg }; staticB = boardStatic(G); }
   try { await openRoom(code); } catch (e) { toast('No se ha podido recuperar la partida'); return; }
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   render(); save();
@@ -337,13 +341,14 @@ setInterval(() => {
 /* ---------- empezar ---------- */
 function startGame() {
   const players = lobby.map((p) => ({ name: p.name, color: p.color }));
-  G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands });
+  applyTheme(cfg.theme);
+  G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands, theme: cfg.theme });
   staticB = boardStatic(G);
   screen = 'game';
   board.stopVictory(); board.followTurn = !board.mobile;
   board.spin(false);
   board.ready = false;
-  board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed });
+  board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed, theme: G.opts.theme });
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   board.ready = true;
   for (const [cid, tok] of conns) send(cid, { t: 'start', b: staticB, you: tokenToPid(tok), code });
@@ -355,15 +360,16 @@ function startGame() {
 async function resume() {
   const s = loadSave();
   cfg = s.cfg; lobby = s.lobby.map((p) => ({ ...p, online: false })); G = s.G; G.ev = [];
+  applyTheme((G.opts && G.opts.theme) || 'classic');
   staticB = boardStatic(G);
   try { await openRoom(s.code); }
   catch (e) { err = 'No se ha podido reabrir la sala (puede tardar un minuto en liberarse). Prueba de nuevo.'; G = null; render(); return; }
   if (room.saved) { // si mientras tanto otro móvil siguió la partida, se continúa desde ahí
     const sv = await unpack(await room.saved());
-    if (sv && sv.G && sv.at > (s.t || 0)) { G = sv.G; G.ev = []; lobby = sv.lobby.map((p) => ({ ...p, online: false })); staticB = boardStatic(G); }
+    if (sv && sv.G && sv.at > (s.t || 0)) { G = sv.G; G.ev = []; applyTheme(G.opts.theme || 'classic'); lobby = sv.lobby.map((p) => ({ ...p, online: false })); staticB = boardStatic(G); }
   }
   screen = 'game'; board.spin(false); board.ready = false;
-  board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed });
+  board.setBoard(staticB, { fog: G.opts.fog, revealed: G.revealed, theme: G.opts.theme });
   board.syncPieces(publicState(G, -1), G.players.map((p) => p.color));
   board.ready = true; render();
   toast('Sala reabierta: los móviles se reconectan solos');

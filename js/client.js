@@ -6,6 +6,8 @@ import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
 import { sound } from './audio.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
+import { applyTheme, ui, themeKey } from './themes.js';
+import { W } from './engine.js';
 document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}</style>`);
 sound.useKeys('colonos-phone-', false, true);
 
@@ -42,6 +44,7 @@ const cost = (c) => Object.entries(c).map(([r, n]) => RINFO[r].e.repeat(n)).join
 // coste con las cartas que te faltan apagadas
 const costHave = (c, res) => Object.entries(c).flatMap(([r, n]) => [...Array(n)].map((_, i) => (i < res[r] ? RINFO[r].e : `<i>${RINFO[r].e}</i>`))).join('');
 const sumRes = (o) => RES.reduce((s, r) => s + (o[r] || 0), 0);
+const bl = (k, ic, n) => ((ui('build') || {})[k] || [ic, n]); // nombre e icono de cada construcción según el tema
 /* ---------- cartas (como las de la caja) ---------- */
 // tag: 'div' o 'button'; at: atributos extra; n: número en la esquina; sub: texto pequeño bajo el nombre
 // arcilla: un bloque de barro húmedo con marcas de dedos (no existe emoji de arcilla)
@@ -54,7 +57,7 @@ const CLAY_SVG = `<svg viewBox="0 0 100 100" class="ill"><defs><radialGradient i
 <circle cx="76" cy="66" r="2.2" fill="#f6b48e" opacity=".7"/></svg>`;
 function cardHTML(r, { size = 'md', n = null, cls = '', at = '', tag = 'div', sub = '', extra = '', st = '' } = {}) {
   const I = RINFO[r];
-  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art">${r === 'brick' ? CLAY_SVG : `<span class="e">${I.e}</span>`}</span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
+  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art">${r === 'brick' && themeKey === 'classic' ? CLAY_SVG : `<span class="e">${I.e}</span>`}</span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
 }
 function backHTML({ size = 'md', cls = '', at = '', tag = 'div', extra = '', st = '' } = {}) {
   return `<${tag} class="ck back ${size} ${cls}" style="${st}" ${at}><span class="emb">⬡</span>${extra}</${tag}>`;
@@ -118,7 +121,7 @@ function onMsg(m) {
     case 'lobby': U.lobby = m; U.me = m.you; if (U.screen !== 'game') U.screen = 'lobby'; U.msg = ''; render(); break;
     case 'start': { const again = U.screen === 'game' && U.B && U.B.hexes.length === m.b.hexes.length; U.B = m.b; U.me = m.you; if (!again) { U.screen = 'game'; U.mode = null; U.sel = null; U.panel = null; U.needBoard = true; } render(); break; }
     case 'state': {
-      U.rolling = 0;
+      U.rolling = 0; applyTheme((m.s.opts && m.s.opts.theme) || 'classic');
       U.S = m.s; U.G = mirror(U.B, m.s);
       autoState();
       if (U.sel && !optionsFor(U.sel).length) U.sel = null;
@@ -134,7 +137,7 @@ function onMsg(m) {
     case 'fx': playFx(m.l || []); if (U.rolling) render(); break;
     case 'note': toast(m.m); break;
     case 'err': toast('⚠️ ' + m.m); break;
-    case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : '¡Te toca!'); break;
+    case 'yourturn': try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} toast(m.sbp ? '🔨 Puedes construir (fase extra)' : ui('turn') || '¡Te toca!'); break;
     case 'full': U.screen = 'join'; U.msg = m.m; net && net.close(); net = null; render(); break;
     case 'closed': U.screen = 'join'; U.msg = 'La partida se ha cerrado. ¡Gracias por jugar!'; U.S = null; U.G = null; U.B = null; U.needBoard = true; net && net.close(); net = null; U.status = 'idle'; render(); break;
     case 'reset': U.cineStarted = false; U.cineDone = false; U.winSeen = false; U.screen = 'lobby'; U.S = null; U.G = null; U.B = null; U.modal = null; U.needBoard = true; render(); break;
@@ -181,17 +184,17 @@ function glow() {
 function optionsFor(sel) {
   const G = U.G, me = U.me, O = glow(), o = [];
   if (!G || !sel) return o;
-  if (sel.k === 'h' && O.h.includes(sel.id)) o.push({ l: '🦹 Mover el ladrón aquí', a: { t: 'robber', h: sel.id } });
+  if (sel.k === 'h' && O.h.includes(sel.id)) o.push({ l: `${W.robberE} Mandar a ${W.robber} aquí`, a: { t: 'robber', h: sel.id } });
   if (sel.k === 'v' && O.v.includes(sel.id)) {
-    if (O.cityV.includes(sel.id)) o.push({ l: '🏰 Ciudad', c: COST.city, a: { t: 'city', v: sel.id } });
-    else o.push({ l: '🏠 Poblado', c: G.phase === 'setup' ? null : COST.settlement, a: { t: 'settle', v: sel.id } });
+    if (O.cityV.includes(sel.id)) o.push({ l: bl('city', '🏰', 'Ciudad').join(' '), c: COST.city, a: { t: 'city', v: sel.id } });
+    else o.push({ l: bl('settlement', '🏠', 'Poblado').join(' '), c: G.phase === 'setup' ? null : COST.settlement, a: { t: 'settle', v: sel.id } });
   }
   if (sel.k === 'e' && O.e.includes(sel.id)) {
     const rb = G.phase === 'roadbuild', su = G.phase === 'setup';
-    if (O.road.includes(sel.id)) o.push({ l: '🛤️ Camino', c: rb || su ? null : COST.road, a: { t: 'road', e: sel.id }, free: rb });
-    if (O.ship.includes(sel.id) && canBuildShipE(G, me, sel.id)) o.push({ l: '⛵ Barco', c: COST.ship, a: { t: 'ship', e: sel.id } });
+    if (O.road.includes(sel.id)) o.push({ l: bl('road', '🛤️', 'Camino').join(' '), c: rb || su ? null : COST.road, a: { t: 'road', e: sel.id }, free: rb });
+    if (O.ship.includes(sel.id) && canBuildShipE(G, me, sel.id)) o.push({ l: bl('ship', '⛵', 'Barco').join(' '), c: COST.ship, a: { t: 'ship', e: sel.id } });
     if (O.move.includes(sel.id)) o.push({ l: '🧭 Navegar aquí', a: { t: 'moveShip', to: sel.id }, free: true });
-    if (O.up.includes(sel.id)) o.push({ l: '⛵ Mejorar barco', c: COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
+    if (O.up.includes(sel.id)) o.push({ l: bl('upship', '⛵', 'Mejorar barco').join(' '), c: COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
   }
   return o;
 }
@@ -235,7 +238,7 @@ function ensure3D() {
   }
   if (U.needBoard && U.S) {
     U.needBoard = false; b3.ready = false;
-    b3.setBoard(U.B, { fog: U.S.opts.fog, revealed: U.S.revealed, robber: U.S.robber });
+    b3.setBoard(U.B, { fog: U.S.opts.fog, revealed: U.S.revealed, robber: U.S.robber, theme: U.S.opts.theme });
     b3.syncPieces(U.S, U.S.players.map((p) => p.color));
     prevRev = { ...U.S.revealed }; b3.ready = true;
   }
@@ -309,9 +312,9 @@ function phaseLine(G) {
   if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco', upship: 'Toca el barco que mejoras' }[U.mode];
   switch (G.phase) {
     case 'setup': return mine ? (G.setupSub === 'settlement' ? 'Toca dónde pones tu poblado' : 'Toca dónde va tu camino') : `${esc(G.players[a].name)} está colocando`;
-    case 'roll': return mine ? 'Te toca: tira los dados' : `Turno de ${esc(G.players[a].name)}`;
+    case 'roll': return mine ? ui('yourTurnRoll') || 'Te toca: tira los dados' : `Turno de ${esc(G.players[a].name)}`;
     case 'discard': return G.discardQueue.includes(me) ? 'Tienes que descartar' : 'Esperando descartes';
-    case 'robber': return G.turn === me ? 'Toca dónde va el ladrón' : `${esc(G.players[G.turn].name)} mueve el ladrón`;
+    case 'robber': return G.turn === me ? ui('robberHint') || 'Toca dónde va el ladrón' : ui('robberOther', esc(G.players[G.turn].name)) || `${esc(G.players[G.turn].name)} mueve el ladrón`;
     case 'steal': return G.turn === me ? 'Elige a quién robas' : `${esc(G.players[G.turn].name)} está robando`;
     case 'roadbuild': return mine ? (G.opts.ships ? `${G.rbLeft} tramo${G.rbLeft > 1 ? 's' : ''} gratis: camino o navegar` : `Coloca ${G.rbLeft} camino${G.rbLeft > 1 ? 's' : ''} gratis`) : `${esc(G.players[a].name)} construye caminos`;
     case 'sbp': return mine ? '🔨 Construcción extra' : `Construcción extra: ${esc(G.players[a].name)}`;
@@ -378,10 +381,10 @@ function handOpenHTML() {
 }
 function buildPanel() {
   const G = U.G, me = U.me, P = G.players[me], can = canBuildNow();
-  const rows = [['road', '🛤️', 'Camino', COST.road, P.roads > 0 && targets(G, me, 'road').e.length], ['settlement', '🏠', 'Poblado', COST.settlement, P.setts > 0 && targets(G, me, 'settlement').v.length], ['city', '🏰', 'Ciudad', COST.city, P.cities > 0 && targets(G, me, 'city').v.length]];
-  if (G.opts.ships) rows.push(['ship', '⛵', 'Barco', COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
-  if (G.opts.ships) rows.push(['upship', '⛵⛵', 'Mejorar barco (2 tramos)', COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
-  rows.push(['dev', '🃏', 'Carta de desarrollo', COST.dev, G.deckN > 0]);
+  const rows = [['road', ...bl('road', '🛤️', 'Camino'), COST.road, P.roads > 0 && targets(G, me, 'road').e.length], ['settlement', ...bl('settlement', '🏠', 'Poblado'), COST.settlement, P.setts > 0 && targets(G, me, 'settlement').v.length], ['city', ...bl('city', '🏰', 'Ciudad'), COST.city, P.cities > 0 && targets(G, me, 'city').v.length]];
+  if (G.opts.ships) rows.push(['ship', ...bl('ship', '⛵', 'Barco'), COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
+  if (G.opts.ships) rows.push(['upship', ...bl('upship', '⛵⛵', 'Mejorar barco (2 tramos)'), COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
+  rows.push(['dev', ...bl('dev', '🃏', 'Carta de desarrollo'), COST.dev, G.deckN > 0]);
   const tag = (ok, room) => (!can ? '' : ok && room ? '<span class="tag y">sí</span>' : ok ? '<span class="tag">sin sitio</span>' : '<span class="tag">falta</span>');
   return `<h3>Construir <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${rows.map(([k, ic, n, c, room]) => { const ok = afford(G, me, c); return `<button class="br ${can && ok && room ? 'ok' : 'no'}" data-a="brow" data-k="${k}" ${can && ok && room ? '' : 'disabled'}><span class="ic">${ic}</span><span class="nm">${n}</span><span class="cost">${costHave(c, P.res)}</span>${tag(ok, room)}</button>`; }).join('')}
@@ -447,7 +450,7 @@ function modalHTML() {
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
     const tot = sumRes(P.res), need = Math.floor(tot / 2), sum = sumRes(U.disc);
-    return box(`<h2>🦹 Ha salido un 7</h2><p>Tienes ${tot} cartas: toca ${need} para devolverlas.</p>
+    return box(`<h2>${ui('discardTitle') || '🦹 Ha salido un 7'}</h2><p>${ui('discardText') ? ui('discardText') + ' ' : ''}Tienes ${tot} cartas: toca ${need} para devolverlas.</p>
       <div class="fanm">${RES.map((r) => { const left = P.res[r] - (U.disc[r] || 0); return cardHTML(r, { tag: 'button', n: left, sub: 'te quedan', at: `data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${left > 0 && sum < need ? '' : 'disabled'}`, extra: U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : '' }); }).join('')}</div>
       <div class="row"><button class="ghost" data-a="discreset" ${sum ? '' : 'disabled'}>Deshacer</button><button class="primary" data-a="discard" ${sum === need ? '' : 'disabled'}>Devolver ${sum}/${need}</button></div>`);
   }
@@ -463,7 +466,7 @@ function modalHTML() {
     const S = U.S;
     if (!hands && S.stealQ !== null && S.stealN) { // robo a ciegas: sus cartas boca abajo
       const vq = S.stealQ;
-      return box(`<h2>🦹 Robas a ${esc(G.players[vq].name)}</h2><p>Sus cartas están barajadas y boca abajo. Toca una para señalarla (${esc(G.players[vq].name)} lo ve) y vuelve a tocarla para llevártela.</p>
+      return box(`<h2>${ui('stealTitle', esc(G.players[vq].name)) || '🦹 Robas a ' + esc(G.players[vq].name)}</h2><p>Sus cartas están barajadas y boca abajo. Toca una para señalarla (${esc(G.players[vq].name)} lo ve) y vuelve a tocarla para llevártela.</p>
         <div class="fanm blind">${[...Array(S.stealN)].map((_, i) => backHTML({ tag: 'button', cls: S.stealSel === i ? 'picked' : '', at: `data-a="${S.stealSel === i ? 'stealtake' : 'stealhover'}" data-q="${vq}" data-i="${i}"`, st: `--i:${i};--n:${S.stealN}`, extra: S.stealSel === i ? '<span class="tk">¡Esta!</span>' : '' })).join('')}</div>
         <div class="row"><button data-a="steal" data-q="${vq}">🎲 Al azar</button>${cands.length > 1 ? '<button class="ghost" data-a="stealrepick">← Otro jugador</button>' : ''}</div>`);
     }
@@ -472,7 +475,7 @@ function modalHTML() {
   // me están robando: veo mis cartas de cara y cuál señala el ladrón
   if (G.phase === 'steal' && U.S.stealMine && U.S.stealQ === me) {
     const S = U.S, th = G.players[G.turn];
-    return box(`<h2>🦹 ¡${esc(th.name)} te está robando!</h2><p>${S.stealSel === null ? 'Está mirando tus cartas por detrás…' : 'Ha señalado una carta. ¿Se la llevará?'}</p>
+    return box(`<h2>${ui('stolenTitle', esc(th.name)) || '🦹 ¡' + esc(th.name) + ' te está robando!'}</h2><p>${S.stealSel === null ? 'Está mirando tus cartas por detrás…' : 'Ha señalado una carta. ¿Se la llevará?'}</p>
       <div class="fanm blind">${S.stealMine.map((r, i) => cardHTML(r, { cls: S.stealSel === i ? 'picked' : '', st: `--i:${i};--n:${S.stealMine.length}`, extra: S.stealSel === i ? '<span class="tk">👆</span>' : '' })).join('')}</div>`);
   }
   if (U.modal && U.modal.t === 'plenty') {
