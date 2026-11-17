@@ -415,7 +415,8 @@ addEventListener('message', (e) => {
   const m = e.data.colonos;
   if (m === 'net') { if (!retired && G !== undefined) onMsg('local', e.data.data); return; }
   if (m === 'lhello') { if (!netWatch) netWatch = setInterval(() => { // el mando del móvil sabe si la partida llega a los demás
-      const ok = !!(room && (!room.connected || room.connected())); if (selfFrame && selfFrame.contentWindow) selfFrame.contentWindow.postMessage({ colonos: 'netok', ok }, location.origin); }, 2000); selfFrame.contentWindow.postMessage({ colonos: retired ? 'retired' : 'lack' }, location.origin); return; }
+      const lt = conns.get('local'), others = lobby.some((p) => !p.bot && p.token !== lt);
+      const ok = !others || !!(room && (!room.connected || room.connected())); if (selfFrame && selfFrame.contentWindow) selfFrame.contentWindow.postMessage({ colonos: 'netok', ok }, location.origin); }, 2000); selfFrame.contentWindow.postMessage({ colonos: retired ? 'retired' : 'lack' }, location.origin); return; }
   if (m === 'addbot' && !G && lobby.length < 8) { addBot(); broadcastLobby(); save(); }
   if (m === 'rmbot' && !G) { const p = lobby[e.data.i]; if (p && p.bot) { lobby.splice(e.data.i, 1); broadcastLobby(); save(); } }
   if (m === 'go' && !G && lobby.length >= 2) startGame();

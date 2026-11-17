@@ -23,8 +23,9 @@ export async function hostRoom(code, h) {
   const forced = QS.get('broker');
   const list = forced ? [forced] : BROKERS;
   if (QS.get('t') !== 'p' && window.mqtt) {
+    // se prueba el servidor de siempre; si no contesta rápido, el siguiente (y nos quedamos con el primero que funcione)
     for (let i = 0; i < list.length; i++) {
-      try { const r = await hostMqtt(code, h, list[i]); linkParams = forced ? { broker: forced } : i ? { b: String(i) } : {}; return r; } catch (e) { console.warn('broker', list[i], e); }
+      try { const r = await hostMqtt(code, h, list[i]); linkParams = forced ? { broker: forced } : i ? { b: String(i) } : {}; try { localStorage.setItem('colonos-b-' + code, String(i)); } catch (e) {} return r; } catch (e) { console.warn('broker', list[i], e); }
     }
   }
   linkParams = { t: 'p' };
@@ -125,13 +126,16 @@ function hostPeer(code, h) {
 export function joinRoom(code, h, token) {
   if (LOCAL) return joinLocal(code, h);
   if (QS.get('t') === 'p' || !window.mqtt) return joinPeer(code, h);
-  const url = QS.get('broker') || BROKERS[+QS.get('b') || 0] || BROKERS[0];
-  return joinMqtt(code, h, token, url);
+  // sin servidor indicado (código tecleado a mano): se van probando los servidores hasta dar con la partida
+  const given = QS.get('broker') || (QS.has('b') ? BROKERS[+QS.get('b')] : null);
+  let known = null; try { known = localStorage.getItem('colonos-b-' + code); } catch (e) {}
+  const url = given || BROKERS[+known || 0] || BROKERS[0];
+  return joinMqtt(code, h, token, url, !given);
 }
-function joinMqtt(code, h, token, url) {
+function joinMqtt(code, h, token, url, rotate) {
   const base = 'colonos/v1/' + code, me = (token || uid()).replace(/[^a-z0-9]/gi, '').slice(0, 24) || uid();
   const state = (s) => h.onStatus && h.onStatus(s);
-  let c = null, closed = false, lastIn = Date.now(), hostEpoch = 0, isOpen = false;
+  let c = null, closed = false, lastIn = Date.now(), hostEpoch = 0, isOpen = false, heard = false, openAt = 0;
   const diag = { tries: 0, err: '', since: Date.now() }; // para el aviso de «Reconectando» (qué está pasando)
   const savedWait = [];
   const pending = []; // mensajes enviados sin conexión: se mandan al reconectar
@@ -143,7 +147,7 @@ function joinMqtt(code, h, token, url) {
     const cl = window.mqtt.connect(url, { clientId: 'colonos-c-' + me.slice(0, 12) + '-' + uid(), clean: true, reconnectPeriod: 1000, connectTimeout: 8000, keepalive: 10 });
     c = cl;
     const opened = () => { // conectados de verdad: avisamos, mandamos lo pendiente y pedimos el estado
-      if (c !== cl || isOpen) return; isOpen = true; diag.tries = 0; diag.err = '';
+      if (c !== cl || isOpen) return; isOpen = true; openAt = Date.now(); diag.tries = 0; diag.err = '';
       lastIn = Date.now(); state('open');
       while (pending.length) cl.publish(base + '/u/' + me, pending.shift(), { qos: 1 });
       h.onOpen && h.onOpen();
@@ -166,7 +170,7 @@ function joinMqtt(code, h, token, url) {
         } catch (e) {}
         return;
       }
-      lastIn = Date.now(); if (!isOpen) opened(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {}
+      lastIn = Date.now(); if (!heard) { heard = true; try { localStorage.setItem('colonos-b-' + code, String(BROKERS.indexOf(url))); } catch (e) {} } if (!isOpen) opened(); try { const m = JSON.parse(payload.toString()); if (m && m.t === 'pong') return; h.onMessage(m); } catch (e) {}
     });
     cl.on('reconnect', () => { if (c === cl) { isOpen = false; diag.tries++; state('connecting'); } });
     cl.on('offline', () => { if (c === cl) { isOpen = false; state('lost'); } });
@@ -182,6 +186,8 @@ function joinMqtt(code, h, token, url) {
   let lastStart = Date.now();
   setInterval(() => {
     if (closed || document.hidden) return;
+    // aún no hemos oído a la partida en este servidor: probamos el siguiente
+    if (rotate && !heard && BROKERS.includes(url) && ((isOpen && Date.now() - openAt > 7000) || (!isOpen && Date.now() - lastStart > 9000))) { url = BROKERS[(BROKERS.indexOf(url) + 1) % BROKERS.length]; start(); return; }
     if (c && c.connected) { send({ t: 'ping' }); if (Date.now() - lastIn > 16000) start(); }
     else if (Date.now() - lastStart > 10000) start(); // reintento enérgico si lleva rato sin conectar
   }, 3000);
@@ -199,7 +205,7 @@ function joinMqtt(code, h, token, url) {
   start();
   return {
     send, close: () => { closed = true; try { c && c.end(true); } catch (e) {} },
-    url, relay: true, lastIn: () => lastIn, retry: () => start(),
+    get url() { return url; }, relay: true, lastIn: () => lastIn, retry: () => start(),
     diag: () => ({ ...diag, url, connected: !!(c && c.connected), secs: Math.round((Date.now() - lastIn) / 1000) }),
     saved: () => new Promise((res) => { savedWait.push(res); if (c && c.connected) c.subscribe(base + '/g', { qos: 1 }); setTimeout(() => res(null), 5000); }),
   };
