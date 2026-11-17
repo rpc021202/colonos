@@ -1,5 +1,7 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
-import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total } from './engine.js';
+import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats } from './engine.js';
+import { summaryHTML, SUMMARY_CSS } from './summary.js';
+document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}#win .card{max-height:92vh;overflow-y:auto}</style>`);
 import { Board3D } from './board3d.js';
 import { hostRoom, makeCode, linkParams, pack, unpack } from './net.js';
 import { botAction } from './bots.js';
@@ -150,6 +152,7 @@ function renderHUD() {
   </div>
   ${G.winner !== null && !G._winClosed ? `<div id="win"><div class="card"><h2>🏆 ¡${pn(G, G.winner)} gana!</h2>
     ${G.players.map((_, i) => i).sort((a, b) => vp(G, b, true) - vp(G, a, true)).map((i) => `<div class="score"><span class="chip" style="background:${G.players[i].color}"></span>${pn(G, i)}<span>${vp(G, i, true)}</span></div>`).join('')}
+    ${summaryHTML(G.players, { ...stats(G), rolls: G.rolls || [] }, G.board.hexes)}
     <div class="seg" style="margin-top:18px"><button class="ghost" data-a="closewin">Ver tablero</button><button class="primary" data-a="again">Otra partida</button></div></div></div>` : ''}`;
 }
 

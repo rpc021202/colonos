@@ -5,6 +5,8 @@ import { joinRoom, unpack } from './net.js';
 import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
 import { sound } from './audio.js';
+import { summaryHTML, SUMMARY_CSS } from './summary.js';
+document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}</style>`);
 sound.useKeys('colonos-phone-', false, true);
 
 const $ = (s) => document.querySelector(s);
@@ -40,6 +42,18 @@ const cost = (c) => Object.entries(c).map(([r, n]) => RINFO[r].e.repeat(n)).join
 // coste con las cartas que te faltan apagadas
 const costHave = (c, res) => Object.entries(c).flatMap(([r, n]) => [...Array(n)].map((_, i) => (i < res[r] ? RINFO[r].e : `<i>${RINFO[r].e}</i>`))).join('');
 const sumRes = (o) => RES.reduce((s, r) => s + (o[r] || 0), 0);
+/* ---------- cartas (como las de la caja) ---------- */
+// tag: 'div' o 'button'; at: atributos extra; n: número en la esquina; sub: texto pequeño bajo el nombre
+function cardHTML(r, { size = 'md', n = null, cls = '', at = '', tag = 'div', sub = '', extra = '', st = '' } = {}) {
+  const I = RINFO[r];
+  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art"><span class="e">${I.e}</span></span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
+}
+function backHTML({ size = 'md', cls = '', at = '', tag = 'div', extra = '', st = '' } = {}) {
+  return `<${tag} class="ck back ${size} ${cls}" style="${st}" ${at}><span class="emb">⬡</span>${extra}</${tag}>`;
+}
+function devCardHTML(t, { size = 'md', extra = '', cls = '' } = {}) {
+  return `<div class="ck dev ${size} ${cls}"><span class="art"><span class="e">${DEV[t].e}</span></span><span class="nm">${DEV[t].n}</span>${size !== 'sm' ? `<span class="d">${DEV[t].d.split('.')[0]}.</span>` : ''}${extra}</div>`;
+}
 
 /* ---------- conexión ---------- */
 // el aviso rojo solo sale si la desconexión dura más de 5 s (al desbloquear el móvil se recupera antes)
@@ -329,17 +343,17 @@ function actionHTML() {
 }
 function handHTML() {
   const P = U.G.players[U.me], n = sumRes(P.res);
-  const cards = RES.filter((r) => P.res[r]).map((r) => `<div class="cd" style="background:${RINFO[r].c}"><span class="e">${RINFO[r].e}</span><span class="n">${P.res[r]}</span></div>`).join('');
-  const devs = P.dev.map((d) => `<div class="cd dev"><span class="e">${DEV[d.t].e}</span></div>`).join('');
+  const cards = RES.filter((r) => P.res[r]).map((r) => cardHTML(r, { size: 'sm', n: P.res[r] })).join('');
+  const devs = P.dev.map((d) => devCardHTML(d.t, { size: 'sm' })).join('');
   return `<button id="hand" data-a="hand">${cards || (devs ? '' : '<span class="empty">Sin cartas</span>')}${cards && devs ? '<span class="gap"></span>' : ''}${devs}${n ? `<span class="tot">${n}</span>` : ''}</button>`;
 }
 function handOpenHTML() {
   const G = U.G, P = G.players[U.me];
   return `<div id="veil" data-a="handclose"></div><div id="fantitle">Tu mano · ${sumRes(P.res)} cartas<span>toca fuera para cerrar</span></div>
-  <div id="fan">${RES.map((r) => `<div class="bc ${P.res[r] ? '' : 'zero'}" style="background:${RINFO[r].c}"><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${P.res[r]}</span></div>`).join('')}
+  <div id="fan">${RES.map((r) => cardHTML(r, { size: 'lg', n: P.res[r] })).join('')}
   ${P.dev.length ? '<span class="sp"></span>' : ''}${P.dev.map((d, i) => {
     const can = d.t !== 'vp' && canPlayDev(G, U.me, i), fresh = d.bt >= G.turnNum && d.t !== 'vp';
-    return `<div class="bc dev"><span class="e">${DEV[d.t].e}</span><span class="t">${DEV[d.t].n}</span><span class="d">${DEV[d.t].d.split('.')[0]}.</span>${d.t === 'vp' ? '<span class="tag">secreta</span>' : can ? `<button class="play" data-a="dev" data-i="${i}">Jugar</button>` : `<span class="tag">${fresh ? 'recién comprada' : 'ahora no'}</span>`}</div>`;
+    return devCardHTML(d.t, { size: 'lg', extra: d.t === 'vp' ? '<span class="tag">secreta</span>' : can ? `<button class="play" data-a="dev" data-i="${i}">Jugar</button>` : `<span class="tag">${fresh ? 'recién comprada' : 'ahora no'}</span>` });
   }).join('')}</div>`;
 }
 function buildPanel() {
@@ -406,14 +420,15 @@ function modalHTML() {
   const box = (inner) => `<div class="modal"><div class="box">${inner}</div></div>`;
   if (G.winner !== null && !U.winSeen) {
     const order = G.players.map((_, i) => i).sort((a, b) => G.players[b].vp - G.players[a].vp);
-    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}${EMBED ? '<button class="primary big" data-a="selfagain">🔁 Otra partida con los mismos</button><div class="note" style="text-align:center">Podrán unirse más con el mismo código antes de empezar.</div>' : ''}
+    return box(`<h2>🏆 ${G.winner === me ? '¡Has ganado!' : '¡' + esc(G.players[G.winner].name) + ' gana!'}</h2>${order.map((i) => `<div class="pl"><span class="chip" style="background:${G.players[i].color}"></span><span class="nm">${esc(G.players[i].name)}</span><span class="vp">${G.players[i].vp}</span></div>`).join('')}
+    ${summaryHTML(G.players, U.S.stats, U.B.hexes)}${EMBED ? '<button class="primary big" data-a="selfagain">🔁 Otra partida con los mismos</button><div class="note" style="text-align:center">Podrán unirse más con el mismo código antes de empezar.</div>' : ''}
     <div class="row"><button class="ghost" data-a="winok">Ver el mapa</button><button class="${EMBED ? 'ghost' : 'primary'}" data-a="gohome">🏠 Salir al inicio</button></div>`);
   }
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
     const tot = sumRes(P.res), need = Math.floor(tot / 2), sum = sumRes(U.disc);
     return box(`<h2>🦹 Ha salido un 7</h2><p>Tienes ${tot} cartas: toca ${need} para devolverlas.</p>
-      <div class="fanm">${RES.map((r) => `<button class="bc ${P.res[r] - (U.disc[r] || 0) ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${P.res[r] - (U.disc[r] || 0) > 0 && sum < need ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">te quedan</span><span class="n">${P.res[r] - (U.disc[r] || 0)}</span>${U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : ''}</button>`).join('')}</div>
+      <div class="fanm">${RES.map((r) => { const left = P.res[r] - (U.disc[r] || 0); return cardHTML(r, { tag: 'button', n: left, sub: 'te quedan', at: `data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${left > 0 && sum < need ? '' : 'disabled'}`, extra: U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : '' }); }).join('')}</div>
       <div class="row"><button class="ghost" data-a="discreset" ${sum ? '' : 'disabled'}>Deshacer</button><button class="primary" data-a="discard" ${sum === need ? '' : 'disabled'}>Devolver ${sum}/${need}</button></div>`);
   }
   if (G.phase === 'steal' && G.turn === me) {
@@ -422,10 +437,23 @@ function modalHTML() {
     if (hands && q !== null && q !== undefined && hands[q]) {
       const H = hands[q];
       return box(`<h2>⚔️ Robas a ${esc(G.players[q].name)}</h2><p>Con el caballero ves su mano: toca la carta que te llevas.</p>
-        <div class="fanm">${RES.map((r) => `<button class="bc ${H[r] ? '' : 'zero'}" style="background:${RINFO[r].c}" data-a="steal" data-q="${q}" data-r="${r}" ${H[r] ? '' : 'disabled'}><span class="e">${RINFO[r].e}</span><span class="t">${RINFO[r].n}</span><span class="n">${H[r]}</span></button>`).join('')}</div>
+        <div class="fanm">${RES.map((r) => cardHTML(r, { tag: 'button', n: H[r], at: `data-a="steal" data-q="${q}" data-r="${r}" ${H[r] ? '' : 'disabled'}` })).join('')}</div>
         ${cands.length > 1 ? '<button class="ghost wide" data-a="stealback">← Elegir otro jugador</button>' : ''}`);
     }
-    return box(`<h2>¿A quién robas?</h2><p>${hands ? 'Con el caballero verás su mano y eliges la carta.' : 'Te llevas una carta al azar.'}</p><div class="row">${cands.map((c) => `<button data-a="${hands ? 'stealq' : 'steal'}" data-q="${c}"><span class="chip" style="background:${G.players[c].color}"></span> ${esc(G.players[c].name)} (${G.players[c].n})</button>`).join('')}</div>`);
+    const S = U.S;
+    if (!hands && S.stealQ !== null && S.stealN) { // robo a ciegas: sus cartas boca abajo
+      const vq = S.stealQ;
+      return box(`<h2>🦹 Robas a ${esc(G.players[vq].name)}</h2><p>Sus cartas están barajadas y boca abajo. Toca una para señalarla (${esc(G.players[vq].name)} lo ve) y vuelve a tocarla para llevártela.</p>
+        <div class="fanm blind">${[...Array(S.stealN)].map((_, i) => backHTML({ tag: 'button', cls: S.stealSel === i ? 'picked' : '', at: `data-a="${S.stealSel === i ? 'stealtake' : 'stealhover'}" data-q="${vq}" data-i="${i}"`, st: `--i:${i};--n:${S.stealN}`, extra: S.stealSel === i ? '<span class="tk">¡Esta!</span>' : '' })).join('')}</div>
+        <div class="row"><button data-a="steal" data-q="${vq}">🎲 Al azar</button>${cands.length > 1 ? '<button class="ghost" data-a="stealrepick">← Otro jugador</button>' : ''}</div>`);
+    }
+    return box(`<h2>¿A quién robas?</h2><p>${hands ? 'Con el caballero verás su mano y eliges la carta.' : 'Elegirás una de sus cartas sin verla.'}</p><div class="row">${cands.map((c) => `<button data-a="${hands ? 'stealq' : 'stealpick'}" data-q="${c}"><span class="chip" style="background:${G.players[c].color}"></span> ${esc(G.players[c].name)} (${G.players[c].n})</button>`).join('')}</div>`);
+  }
+  // me están robando: veo mis cartas de cara y cuál señala el ladrón
+  if (G.phase === 'steal' && U.S.stealMine && U.S.stealQ === me) {
+    const S = U.S, th = G.players[G.turn];
+    return box(`<h2>🦹 ¡${esc(th.name)} te está robando!</h2><p>${S.stealSel === null ? 'Está mirando tus cartas por detrás…' : 'Ha señalado una carta. ¿Se la llevará?'}</p>
+      <div class="fanm blind">${S.stealMine.map((r, i) => cardHTML(r, { cls: S.stealSel === i ? 'picked' : '', st: `--i:${i};--n:${S.stealMine.length}`, extra: S.stealSel === i ? '<span class="tk">👆</span>' : '' })).join('')}</div>`);
   }
   if (U.modal && U.modal.t === 'plenty') {
     const pk = U.modal.pick;
@@ -499,6 +527,10 @@ document.addEventListener('click', (e) => {
     case 'stealq': U.stealQ = +d.q; render(); break;
     case 'stealback': U.stealQ = null; render(); break;
     case 'steal': send(d.r ? { t: 'steal', q: +d.q, r: d.r } : { t: 'steal', q: +d.q }); break;
+    case 'stealpick': send({ t: 'stealPick', q: +d.q }); break;
+    case 'stealhover': U.S.stealSel = +d.i; render(); send({ t: 'stealHover', i: +d.i }); break; // se marca al momento en este móvil
+    case 'stealtake': send({ t: 'steal', q: +d.q, i: +d.i }); break;
+    case 'stealrepick': U.S.stealQ = null; U.S.stealN = 0; render(); break;
     case 'bgive': U.bank.give = d.r; if (U.bank.get === d.r) U.bank.get = null; render(); break;
     case 'bget': U.bank.get = d.r; render(); break;
     case 'bankdo': send({ t: 'bank', give: U.bank.give, get: U.bank.get }); U.bank = { give: null, get: null }; break;

@@ -276,6 +276,12 @@ export function newGame(opts) {
   log(G, `Empieza <b>${pn(G, start)}</b>. Colocad los primeros poblados${opts.ships ? ' en la isla principal' : ''}.`);
   return G;
 }
+// estadísticas para el resumen final (se crean al vuelo, también en partidas guardadas de antes)
+export function stats(G) {
+  const n = G.players.length;
+  if (!G.stats) G.stats = { got: Array(n).fill(0), stole: Array(n).fill(0), lost: Array(n).fill(0), disc: Array(n).fill(0), hex: {} };
+  return G.stats;
+}
 export function log(G, m) { G.log.unshift(m); if (G.log.length > 60) G.log.length = 60; }
 export function pn(G, i) { return esc(G.players[i].name); }
 export function total(G, p) { return RES.reduce((s, r) => s + G.players[p].res[r], 0); }
@@ -474,10 +480,11 @@ function produce(G, n) {
   const flows = [];
   gains.forEach((g, i) => {
     const parts = [];
-    for (const r in g) { if (!g[r]) continue; G.players[i].res[r] += g[r]; G.bank[r] -= g[r]; parts.push(g[r] + RINFO[r].e); flows.push({ p: i, r, n: g[r] }); }
+    for (const r in g) { if (!g[r]) continue; G.players[i].res[r] += g[r]; G.bank[r] -= g[r]; parts.push(g[r] + RINFO[r].e); flows.push({ p: i, r, n: g[r] }); stats(G).got[i] += g[r]; }
     if (parts.length) { any = true; log(G, `<b>${pn(G, i)}</b> recibe ${parts.join(' ')}`); G.ev.push({ t: 'gain', to: i, m: `Recibes ${parts.join(' ')}` }); }
   });
   if (!any) log(G, 'Nadie recibe nada');
+  fx.forEach((f) => { if (gains[f.p][f.r]) { const H = stats(G).hex; H[f.h] = (H[f.h] || 0) + f.n; } });
   G.ev.push({ t: 'produce', hexes, flows, fx: fx.filter((f) => gains[f.p][f.r] > 0) });
 }
 function startSeven(G) {
@@ -489,12 +496,18 @@ function startSeven(G) {
   if (G.phase === 'robber') skipRobberIfNoTarget(G);
 }
 function skipRobberIfNoTarget(G) { if (!robberTargets(G).length) { log(G, 'El ladrón no tiene adónde ir'); finishRobber(G); } }
-function finishRobber(G) { G.phase = G.afterRobber || 'main'; G.afterRobber = null; G.stealCands = []; G.knightSteal = false; }
+function finishRobber(G) { G.phase = G.afterRobber || 'main'; G.afterRobber = null; G.stealCands = []; G.knightSteal = false; G.stealQ = null; G.stealDeck = null; G.stealSel = null; }
+// robo a ciegas con el 7: se barajan las cartas de la víctima y el ladrón elige una sin verla
+function prepSteal(G, q) {
+  const deck = []; RES.forEach((r) => { for (let i = 0; i < G.players[q].res[r]; i++) deck.push(r); });
+  G.stealQ = q; G.stealDeck = shuffle(deck); G.stealSel = null;
+}
 // con caballero se elige la carta viendo la mano del rival; con un 7, al azar
-function doSteal(G, q, pick) {
+function doSteal(G, q, pick, chosen) {
   const pool = [];
   RES.forEach((r) => { for (let i = 0; i < G.players[q].res[r]; i++) pool.push(r); });
-  const r = G.knightSteal && RES.includes(pick) && G.players[q].res[pick] > 0 ? pick : pool[rnd(pool.length)];
+  const r = (G.knightSteal || chosen) && RES.includes(pick) && G.players[q].res[pick] > 0 ? pick : pool[rnd(pool.length)];
+  stats(G).stole[G.turn]++; stats(G).lost[q]++;
   G.players[q].res[r]--; G.players[G.turn].res[r]++;
   log(G, `<b>${pn(G, G.turn)}</b> roba una carta a <b>${pn(G, q)}</b>`);
   G.ev.push({ t: 'gain', to: G.turn, m: `Robas ${RINFO[r].e} ${RINFO[r].n} a ${G.players[q].name}` });
@@ -632,6 +645,7 @@ export function act(G, p, a) {
       for (const r of RES) { const n = sel[r] | 0; if (n < 0 || n > me.res[r]) return 'Selección no válida'; sum += n; }
       if (sum !== need) return `Tienes que descartar ${need}`;
       for (const r of RES) { me.res[r] -= sel[r] | 0; G.bank[r] += sel[r] | 0; }
+      stats(G).disc[p] += need;
       log(G, `<b>${pn(G, p)}</b> descarta ${need} cartas`);
       G.discardQueue.splice(G.discardQueue.indexOf(p), 1);
       if (!G.discardQueue.length) { G.phase = 'robber'; skipRobberIfNoTarget(G); }
@@ -647,12 +661,21 @@ export function act(G, p, a) {
       log(G, `🦹 El ladrón se mueve a ${RINFO[hx.res].e}${hx.num ? ' ' + hx.num : ''}`);
       const cands = [...new Set(hx.verts.map((v) => G.board.verts[v].b).filter((b) => b && b.p !== p).map((b) => b.p))].filter((q) => total(G, q) > 0);
       if (!cands.length) finishRobber(G);
-      else if (cands.length === 1 && !G.knightSteal) doSteal(G, cands[0]);
-      else { G.phase = 'steal'; G.stealCands = cands; }
+      else { G.phase = 'steal'; G.stealCands = cands; if (cands.length === 1 && !G.knightSteal) prepSteal(G, cands[0]); }
       return null;
+    }
+    case 'stealPick': { // con el 7: elegir a quién se roba (luego se elige carta sin verla)
+      if (G.phase !== 'steal' || G.turn !== p || G.knightSteal || !G.stealCands.includes(a.q)) return 'No puedes robar a ese jugador';
+      prepSteal(G, a.q); return null;
+    }
+    case 'stealHover': { // el ladrón señala una carta: la víctima lo ve en su móvil
+      if (G.phase !== 'steal' || G.turn !== p || !G.stealDeck) return 'Ahora no';
+      const i = a.i | 0; if (i < 0 || i >= G.stealDeck.length) return 'Esa carta no existe';
+      G.stealSel = i; return null;
     }
     case 'steal': {
       if (G.phase !== 'steal' || G.turn !== p || !G.stealCands.includes(a.q)) return 'No puedes robar a ese jugador';
+      if (!G.knightSteal && G.stealDeck && G.stealQ === a.q && Number.isInteger(a.i) && a.i >= 0 && a.i < G.stealDeck.length) { doSteal(G, a.q, G.stealDeck[a.i], true); return null; }
       doSteal(G, a.q, a.r); return null;
     }
     case 'buyDev': {
@@ -688,6 +711,7 @@ export function act(G, p, a) {
         const q = a.q, P2 = G.players[q], got = [];
         for (let k = 0; k < 2; k++) { const pool = []; RES.forEach((r) => { for (let i = 0; i < P2.res[r]; i++) pool.push(r); }); if (!pool.length) break; const r = pool[rnd(pool.length)]; P2.res[r]--; me.res[r]++; got.push(r); }
         log(G, `🏴‍☠️ <b>${pn(G, p)}</b> asalta los barcos de <b>${pn(G, q)}</b> y le roba ${got.length} cartas`);
+        stats(G).stole[p] += got.length; stats(G).lost[q] += got.length;
         G.ev.push({ t: 'gain', to: p, m: `Botín pirata: ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'gain', to: q, m: `¡Piratas! Te roban ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'pirate', p, q });
       }
       else if (d.t === 'plenty') { a.list.slice(0, 2).forEach((r) => { G.bank[r]--; me.res[r]++; }); log(G, `<b>${pn(G, p)}</b> coge ${a.list.slice(0, 2).map((r) => RINFO[r].e).join(' ')} del banco`); }
@@ -695,6 +719,7 @@ export function act(G, p, a) {
         let n = 0;
         G.players.forEach((P, j) => { if (j === p) return; n += P.res[a.r]; if (P.res[a.r]) G.ev.push({ t: 'gain', to: j, m: `Monopolio: pierdes ${P.res[a.r]} ${RINFO[a.r].e}` }); P.res[a.r] = 0; });
         me.res[a.r] += n; log(G, `💰 <b>${pn(G, p)}</b> se lleva ${n} ${RINFO[a.r].e}`);
+        stats(G).stole[p] += n;
       }
       return null;
     }
@@ -796,7 +821,9 @@ export function publicState(G, forP) {
     phase: G.phase, turn: G.turn, turnNum: G.turnNum, dice: G.dice, rolls: G.rolls || [], rollId: G.rollId, setupSub: G.setupSub, lastSett: G.lastSett, setupIdx: G.setupIdx,
     robber: B.robber, revealed: G.revealed, longest: G.longest, army: G.army, roadLens: G.roadLens, winner: G.winner,
     playedDev: G.playedDev, rbLeft: G.rbLeft, sbpQueue: G.sbpQueue, discardQueue: G.discardQueue, stealCands: G.stealCands, offer: G.offer,
-    deckN: G.deck.length, knightSteal: !!G.knightSteal,
+    deckN: G.deck.length, knightSteal: !!G.knightSteal, stealQ: G.stealQ ?? null, stealSel: G.stealSel ?? null, stealN: G.stealDeck ? G.stealDeck.length : 0,
+    stealMine: G.stealDeck && forP === G.stealQ ? G.stealDeck : null, // la víctima ve sus cartas de cara
+    stats: G.winner !== null ? { ...stats(G), rolls: G.rolls || [] } : null,
     stealHands: G.phase === 'steal' && G.knightSteal && forP === G.turn ? Object.fromEntries(G.stealCands.map((q) => [q, { ...G.players[q].res }])) : null, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands },
     ships: G.ships || [], islandClaim: G.islandClaim || {},
     buildings: B.verts.filter((v) => v.b).map((v) => [v.id, v.b.p, v.b.t]),

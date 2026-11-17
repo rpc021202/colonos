@@ -93,6 +93,26 @@ function walkerMesh(color, res) {
   g.scale.setScalar(1.9);
   return g;
 }
+function trophyMesh(kind, color) {
+  const g = new THREE.Group(), wood = new THREE.MeshStandardMaterial({ color: '#5b3d24', roughness: 0.8 }), gold = new THREE.MeshStandardMaterial({ color: '#d9b44a', metalness: 0.6, roughness: 0.35 });
+  const cloth = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide });
+  const h = kind === 'army' ? 0.5 : 0.42;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, h, 8), wood); pole.position.y = h / 2; g.add(pole);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), gold); knob.position.y = h + 0.01; g.add(knob);
+  const flag = new THREE.Group(); flag.position.y = h - 0.02; g.add(flag);
+  if (kind === 'longest') { // banderín largo en punta (camino más largo)
+    const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.lineTo(0.2, -0.035); sh.lineTo(0, -0.07); sh.lineTo(0, 0);
+    const f = new THREE.Mesh(new THREE.ShapeGeometry(sh), cloth); flag.add(f);
+    const road = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.008, 0.004), gold); road.position.set(0.05, -0.035, 0.002); flag.add(road);
+  } else { // estandarte cuadrado con espadas cruzadas (mayor ejército)
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.12), cloth); f.position.set(0.075, -0.06, 0); flag.add(f);
+    const border = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.13), gold); border.position.set(0.075, -0.06, -0.001); flag.add(border);
+    [-1, 1].forEach((d) => { const sw = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.1, 0.003), new THREE.MeshStandardMaterial({ color: '#e8e8ee', metalness: 0.7, roughness: 0.3 })); sw.position.set(0.075, -0.06, 0.003); sw.rotation.z = d * 0.6; flag.add(sw); });
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  g.userData.flag = flag;
+  return g;
+}
 function birdMesh() {
   const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: '#f2f2f2', side: THREE.DoubleSide, roughness: 0.9 });
   const wing = new THREE.BufferGeometry(); wing.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, -0.03, 0, 0.09, 0.03, 0, 0.02], 3)); wing.computeVertexNormals();
@@ -420,6 +440,16 @@ function dieFaceTex(n) {
 /* ---------- piezas ---------- */
 function shade(hex, k) { const c = C(hex); c.multiplyScalar(k); return '#' + c.getHexString(); }
 const pieceMat = () => new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.02 });
+// ventanas: se encienden de noche (un solo material para todas, la luz la marca el ciclo de día y noche)
+const WIN_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, emissive: '#ffb347', emissiveIntensity: 0 });
+const WIN_COL = C('#ffd98a');
+function withWindows(L) {
+  const win = [], rest = [];
+  L.forEach((g) => { const c = g.attributes.color; (c && Math.abs(c.getX(0) - WIN_COL.r) < 1e-4 && Math.abs(c.getY(0) - WIN_COL.g) < 1e-4 && Math.abs(c.getZ(0) - WIN_COL.b) < 1e-4 ? win : rest).push(g); });
+  const grp = new THREE.Group(); grp.add(merged(rest, pieceMat()));
+  if (win.length) { const w = merged(win, WIN_MAT); w.castShadow = false; grp.add(w); }
+  return grp;
+}
 // tejado a dos aguas hecho de hileras de tejas
 function gableRoof(L, cx, cy, cz, w, d, h, color, rot = 0) {
   const half = w / 2, slope = Math.hypot(half, h), ang = Math.atan2(h, half), rows = 4;
@@ -462,7 +492,7 @@ function settlementMesh(color) {
   T_(L, G_ICO0, '#4f7f30', 0.075, 0.018, 0.075, 0.022, 0.018, 0.022);   // arbusto
   T_(L, G_CYL8, '#8a8378', -0.085, 0.02, 0.06, 0.018, 0.04, 0.018);     // pozo
   T_(L, G_CYL8, '#2c4a66', -0.085, 0.041, 0.06, 0.013, 0.003, 0.013);
-  return merged(L, pieceMat());
+  return withWindows(L);
 }
 // Ciudad: casas grandes de dos alturas y una iglesia con campanario
 function cityMesh(color) {
@@ -492,7 +522,7 @@ function cityMesh(color) {
   house(L, -0.08, 0.09, 0.13, 0.1, 0.11, color, 0.2);
   house(L, 0.09, 0.08, 0.12, 0.095, 0.1, color, -0.25);
   T_(L, G_ICO0, '#4f7f30', 0.0, 0.03, 0.12, 0.028, 0.024, 0.028);
-  return merged(L, pieceMat());
+  return withWindows(L);
 }
 // Camino: vigas + tablones sueltos (cada tablón cae por separado)
 function roadMesh(color, len) {
@@ -645,6 +675,8 @@ export class Board3D {
   animateLife(dt, time) {
     const L = this.life; if (!L) return;
     if (L.walkers) this.animateWalkers(dt, time);
+    if (this.aura && !this.aura.userData.fading) { const [veil, ring] = this.aura.userData.mats; if (veil.opacity > 0.05) { veil.opacity = 0.26 + 0.06 * Math.sin(time * 1.6); ring.opacity = 0.4 + 0.2 * Math.sin(time * 2.3); } }
+    if (this.trophies) Object.values(this.trophies).forEach((tr) => { if (tr && tr.userData.flag) tr.userData.flag.rotation.y = Math.sin(time * 2.2 + tr.userData.ph) * 0.25; });
     L.foam.forEach((f) => { f.material.opacity = 0.22 + 0.2 * Math.sin(time * 1.3 + f.userData.ph); const k = 1 + 0.025 * Math.sin(time * 1.3 + f.userData.ph); f.scale.set(k, k, 1); });
     L.sheep.forEach((sh) => {
       const u = sh.userData; u.graze += dt;
@@ -674,11 +706,14 @@ export class Board3D {
       return true;
     });
     // día y noche: un ciclo suave de 8 minutos (nunca llega a oscuro del todo)
-    if (this.hq) {
-      const ph = (time / 480) % 1, l = 0.78 + 0.22 * Math.cos(ph * Math.PI * 2);
-      this.sun.intensity = 2.2 * l; this.sun.color.setRGB(1, 0.86 + 0.1 * l, 0.7 + 0.25 * l);
+    // en todas las pantallas a la vez (va por la hora real), así todos ven el mismo momento del día
+    {
+      if (this.sunI0 === undefined) { this.sunI0 = this.sun.intensity; this.exp0 = this.renderer.toneMappingExposure; }
+      const ph = (Date.now() / 1000 / 480) % 1, l = 0.7 + 0.3 * Math.cos(ph * Math.PI * 2);
+      this.sun.intensity = this.sunI0 * l; this.sun.color.setRGB(0.85 + 0.15 * l, 0.8 + 0.16 * l, 0.75 + 0.25 * l);
       this.sun.position.set(-6 * Math.cos(ph * Math.PI * 2), 11 * (0.6 + 0.4 * l), 6);
-      this.renderer.toneMappingExposure = 0.95 * (0.8 + 0.2 * l);
+      this.renderer.toneMappingExposure = this.exp0 * (0.78 + 0.22 * l);
+      WIN_MAT.emissiveIntensity = Math.max(0, Math.min(1.6, (0.74 - l) * 6)); // de noche las ventanas se encienden
     }
   }
   worldToScreen(x, y, z) {
@@ -687,7 +722,7 @@ export class Board3D {
   }
   clear() {
     this.scene.remove(this.root); this.root = new THREE.Group(); this.scene.add(this.root);
-    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [], walkers: {} }; this.ships = {};
+    this.tiles = []; this.pieces = { v: {}, e: {} }; this.fog = []; this.robber = null; this.dice = null; this.water = null; this.water2 = null; this.tokens = []; this.ports = []; this.markers = null; this.hits = []; this.life = { sheep: [], birds: [], foam: [], smoke: [], walkers: {} }; this.ships = {}; this.trophies = null; this.aura = null;
   }
   setBoard(B, opts = {}) {
     this.clear(); this.B = B; SEED = (opts.seed || B.hexes.length * 7919 + Math.round(B.hexes[0].x * 1000)) | 0;
@@ -856,12 +891,37 @@ export class Board3D {
   hexTopAt(id) { const t = this.tiles[id]; return t ? t.T.h(0.38, 0.12) : TOP; }
   placeRobber(h, animate = true) {
     const t = this.tiles[h]; if (!t) return;
-    this.robberHex = h;
+    const old = this.robberHex; this.robberHex = h;
     const to = new THREE.Vector3(t.h.x + 0.38, t.T.h(0.38, 0.12), t.h.y + 0.12);
     this.robber.visible = !t.hidden;
+    this.setAura(h, animate, old);
     if (!animate) { this.robber.position.copy(to); return; }
-    const from = this.robber.position.clone();
-    this.tween(0.9, (k) => { const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; this.robber.position.lerpVectors(from, to, e); this.robber.position.y += Math.sin(k * Math.PI) * 1.2; });
+    // el ladrón cruza el mapa andando, a saltitos, hasta su nueva casilla (intriga: ¿dónde se parará?)
+    const from = this.robber.position.clone(), dist = from.distanceTo(to), dur = Math.min(4, Math.max(1.4, dist * 0.55)), steps = Math.max(4, Math.round(dist * 4));
+    const ry0 = this.robber.rotation.y, face = Math.atan2(to.x - from.x, to.z - from.z);
+    this.tween(dur, (k) => {
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      this.robber.position.lerpVectors(from, to, e);
+      this.robber.position.y += Math.sin(k * Math.PI) * Math.min(0.9, 0.25 + dist * 0.08) + Math.abs(Math.sin(k * steps * Math.PI)) * 0.07;
+      this.robber.rotation.y = k < 0.9 ? face : face + (ry0 - face) * ((k - 0.9) / 0.1) * 0;
+      this.robber.rotation.z = Math.sin(k * steps * Math.PI) * 0.12;
+    }, () => { this.robber.rotation.z = 0; });
+  }
+  // aura oscura sobre la casilla del ladrón: esa casilla no produce
+  setAura(h, animate, old) {
+    const t = this.tiles[h]; if (!t) return;
+    const prev = this.aura; this.aura = null;
+    if (prev) { const ms = prev.userData.mats; if (animate) this.tween(0.8, (k) => ms.forEach((m) => (m.opacity = m.userData.o * (1 - k))), () => this.root.remove(prev)); else this.root.remove(prev); }
+    const g = new THREE.Group(); g.position.set(t.h.x, 0, t.h.y);
+    const veil = new THREE.MeshBasicMaterial({ color: '#160a22', transparent: true, opacity: 0.3, depthWrite: false });
+    const box = new THREE.Mesh(new THREE.CylinderGeometry(0.985, 0.985, 1.0, 6, 1, false), veil); box.rotation.y = Math.PI / 6; box.position.y = 0.42; box.renderOrder = 3;
+    const ringM = new THREE.MeshBasicMaterial({ color: '#7a3cff', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.16, 6, 1, true), ringM); ring.rotation.y = Math.PI / 6; ring.position.y = TOP + 0.04;
+    veil.userData.o = 0.3; ringM.userData.o = 0.55;
+    g.add(box, ring); g.userData = { mats: [veil, ringM], hex: h }; g.visible = !t.hidden;
+    if (t.hidden) { g.visible = false; }
+    this.root.add(g); this.aura = g;
+    if (animate) { [veil, ringM].forEach((m) => (m.opacity = 0)); setTimeout(() => this.tween(0.9, (k) => [veil, ringM].forEach((m) => (m.opacity = m.userData.o * k))), Math.min(3800, 1200)); }
   }
   syncShips(list, colors) {
     this.ships = this.ships || {};
@@ -907,8 +967,37 @@ export class Board3D {
     for (const k in this.pieces.v) if (!seenV.has(+k)) { this.root.remove(this.pieces.v[k]); delete this.pieces.v[k]; }
     for (const k in this.pieces.e) if (!seenE.has(+k)) { this.root.remove(this.pieces.e[k]); delete this.pieces.e[k]; }
     this.syncWalkers(s, colors);
+    this.syncTrophies(s, colors);
     if (s.robber !== this.robberHex) this.placeRobber(s.robber, !!this.ready);
     const rt = this.tiles[s.robber]; this.robber.visible = !(rt && rt.hidden);
+  }
+  // trofeos en el tablero: estandarte del camino más largo y bandera del mayor ejército
+  syncTrophies(s, colors) {
+    this.trophies = this.trophies || { longest: null, army: null };
+    const B = this.B;
+    const spot = (kind, p) => {
+      if (kind === 'longest') {
+        const mine = (s.roads || []).filter(([, q]) => q === p).map(([e]) => B.edges[e]);
+        if (!mine.length) return null;
+        const cx = mine.reduce((a, E) => a + (B.verts[E.v[0]].x + B.verts[E.v[1]].x) / 2, 0) / mine.length, cz = mine.reduce((a, E) => a + (B.verts[E.v[0]].y + B.verts[E.v[1]].y) / 2, 0) / mine.length;
+        const E = mine.sort((x, y) => { const d = (E2) => Math.hypot((B.verts[E2.v[0]].x + B.verts[E2.v[1]].x) / 2 - cx, (B.verts[E2.v[0]].y + B.verts[E2.v[1]].y) / 2 - cz); return d(x) - d(y); })[0];
+        const a = B.verts[E.v[0]], b = B.verts[E.v[1]];
+        return { x: (a.x + b.x) / 2, z: (a.y + b.y) / 2, key: E.id };
+      }
+      const bs = (s.buildings || []).filter(([, q]) => q === p).sort((x, y) => (y[2] === 'c') - (x[2] === 'c'));
+      if (!bs.length) return null;
+      const V = B.verts[bs[0][0]]; return { x: V.x + 0.13, z: V.y + 0.1, key: bs[0][0] };
+    };
+    for (const kind of ['longest', 'army']) {
+      const p = kind === 'longest' ? s.longest : s.army, cur = this.trophies[kind];
+      const sp = p !== null && p !== undefined ? spot(kind, p) : null;
+      if (cur && sp && cur.userData.p === p && cur.userData.key === sp.key) continue;
+      if (cur) { this.trophies[kind] = null; if (this.ready) this.tween(0.5, (k) => cur.scale.setScalar(Math.max(0.01, 1 - k)), () => this.root.remove(cur)); else this.root.remove(cur); }
+      if (!sp) continue;
+      const m = trophyMesh(kind, colors[p]); m.position.set(sp.x, TOP, sp.z); m.userData.p = p; m.userData.key = sp.key; m.userData.ph = Math.random() * 6;
+      this.root.add(m); this.trophies[kind] = m;
+      if (this.ready) { m.scale.setScalar(0.01); setTimeout(() => this.tween(0.7, (k) => m.scale.setScalar(Math.max(0.01, k < 0.7 ? (k / 0.7) * 1.15 : 1.15 - (k - 0.7) * 0.5))), 600); }
+    }
   }
   syncWalkers(s, colors) {
     const B = this.B, W = this.life.walkers, want = new Set(), cap = this.mobile ? 40 : 70;
