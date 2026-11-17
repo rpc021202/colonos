@@ -1,7 +1,7 @@
 // Pantalla de juego (ordenador o tele): configurador, sala con QR y tablero 3D.
 import { newGame, act, publicState, boardStatic, genBoard, hexCountFor, DENSITIES, COLORS, actor, pn, esc, vp, total, stats, winnerSpots } from './engine.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
-import { THEMES, applyTheme } from './themes.js';
+import { THEMES, applyTheme, richText } from './themes.js';
 import { RINFO } from './engine.js';
 document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}#win .card{max-height:92vh;overflow-y:auto}</style>`);
 import { Board3D } from './board3d.js';
@@ -24,13 +24,13 @@ let hudHidden = false, err = '';
 
 /* ---------- utilidades ---------- */
 let toastT;
-function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+function toast(m) { const t = $('#toast'); t.innerHTML = richText(m); t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
 const bannerQ = []; let bannerBusy = false;
 function banner(m) { bannerQ.push(m); if (!bannerBusy) nextBanner(); }
 function nextBanner() {
   const b = $('#banner'); const m = bannerQ.shift();
   if (!b || !m) { bannerBusy = false; return; }
-  bannerBusy = true; b.textContent = m; b.classList.add('show');
+  bannerBusy = true; b.innerHTML = richText(m); b.classList.add('show');
   setTimeout(() => { b.classList.remove('show'); setTimeout(nextBanner, 350); }, 2300);
 }
 function joinURL() {
@@ -171,7 +171,7 @@ function flyResources(fx) {
     const chip = document.querySelector(`.pc[data-p="${f.p}"]`); if (!chip) return;
     const r = chip.getBoundingClientRect(), ex = r.left + r.width / 2, ey = r.top + r.height / 2;
     for (let k = 0; k < f.n; k++) {
-      const el = document.createElement('div'); el.className = 'fly'; el.textContent = EMO[f.r]; document.body.appendChild(el);
+      const el = document.createElement('div'); el.className = 'fly'; el.innerHTML = EMO[f.r]; document.body.appendChild(el);
       const mx = (s1.x + ex) / 2, my = Math.min(s1.y, ey) - 140;
       const a = el.animate([
         { transform: `translate(${s0.x}px,${s0.y}px) scale(.4)`, opacity: 0 },

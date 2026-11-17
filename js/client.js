@@ -6,7 +6,7 @@ import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
 import { sound } from './audio.js';
 import { summaryHTML, SUMMARY_CSS } from './summary.js';
-import { applyTheme, ui, themeKey } from './themes.js';
+import { applyTheme, ui, themeKey, richText } from './themes.js';
 import { W } from './engine.js';
 document.head.insertAdjacentHTML('beforeend', `<style>${SUMMARY_CSS}</style>`);
 sound.useKeys('colonos-phone-', false, true);
@@ -32,7 +32,7 @@ let net = null;
 
 /* ---------- utilidades ---------- */
 let toastT;
-function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+function toast(m) { const t = $('#toast'); t.innerHTML = richText(m); t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
 function token() {
   const k = 'colonos-token-' + U.code;
   let t = store.get(k, null);
@@ -64,7 +64,7 @@ const CLAY_SVG = `<svg viewBox="0 0 100 100" class="ill"><defs><radialGradient i
 <circle cx="76" cy="66" r="2.2" fill="#f6b48e" opacity=".7"/></svg>`;
 function cardHTML(r, { size = 'md', n = null, cls = '', at = '', tag = 'div', sub = '', extra = '', st = '' } = {}) {
   const I = RINFO[r];
-  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art">${r === 'brick' && themeKey === 'classic' ? CLAY_SVG : r === 'brick' && themeKey === 'barrio' ? GUN_SVG : r === 'sheep' && themeKey === 'barrio' ? LEAF_SVG : `<span class="e">${I.e}</span>`}</span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
+  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art">${r === 'brick' && themeKey === 'classic' ? CLAY_SVG : I.e && I.e.startsWith('<img') ? I.e.replace('class="ri"', 'class="ill"') : `<span class="e">${I.e}</span>`}</span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
 }
 function backHTML({ size = 'md', cls = '', at = '', tag = 'div', extra = '', st = '' } = {}) {
   return `<${tag} class="ck back ${size} ${cls}" style="${st}" ${at}><span class="emb">⬡</span>${extra}</${tag}>`;

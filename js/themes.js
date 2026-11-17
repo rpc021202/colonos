@@ -12,11 +12,11 @@ export const THEMES = {
   barrio: {
     name: 'El Barrio', icon: '🏀', note: 'Bandas por colores, calles con grafitis y la pasma rondando. Parodia, todo de mentira.',
     RINFO: {
-      wood: { n: 'Sprays', e: '🎨', c: '#e8467f' },
-      brick: { n: 'Pipas', e: '🔫', c: '#5b5f6b' },
-      sheep: { n: 'María', e: '🌿', c: '#4e9a3a' },
-      wheat: { n: 'Pasta', e: '💸', c: '#2e8b57' },
-      ore: { n: 'Bling', e: '💎', c: '#c9a227' },
+      wood: { n: 'Sprays', e: '<img class="ri" src="icons/res/spray.svg" alt="🎨">', c: '#e8467f' },
+      brick: { n: 'Pipas', e: '<img class="ri" src="icons/res/gun.svg" alt="🔫">', c: '#5b5f6b' },
+      sheep: { n: 'María', e: '<img class="ri" src="icons/res/leaf.svg" alt="🌿">', c: '#4e9a3a' },
+      wheat: { n: 'Pasta', e: '<img class="ri" src="icons/res/cash.svg" alt="💵">', c: '#2e8b57' },
+      ore: { n: 'Bling', e: '<img class="ri" src="icons/res/gem.svg" alt="💎">', c: '#c9a227' },
       desert: { n: 'Cancha', e: '🏀', c: '#d9773a' },
     },
     DEV: {
@@ -54,5 +54,13 @@ export function applyTheme(key) {
   for (const k in BASE.DEV) Object.assign(DEV[k], BASE.DEV[k], (T.DEV || {})[k] || {});
   Object.assign(W, BASE.W, T.W || {});
   return T;
+}
+// texto con iconos de recurso (imágenes del tema) pero sin dejar pasar otro HTML (nombres de jugadores, etc.)
+const escH = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+export function richText(m) {
+  let o = escH(m);
+  for (const k in RINFO) { const e = RINFO[k].e; if (e && e.startsWith('<img')) o = o.split(escH(e)).join(e); }
+  o = o.replace(/&lt;(\/?)b&gt;/g, '<$1b>');
+  return o;
 }
 export const ui = (k, ...a) => { const v = (theme.UI || {})[k]; return typeof v === 'function' ? v(...a) : v; };
