@@ -44,9 +44,17 @@ const costHave = (c, res) => Object.entries(c).flatMap(([r, n]) => [...Array(n)]
 const sumRes = (o) => RES.reduce((s, r) => s + (o[r] || 0), 0);
 /* ---------- cartas (como las de la caja) ---------- */
 // tag: 'div' o 'button'; at: atributos extra; n: número en la esquina; sub: texto pequeño bajo el nombre
+// arcilla: un bloque de barro húmedo con marcas de dedos (no existe emoji de arcilla)
+const CLAY_SVG = `<svg viewBox="0 0 100 100" class="ill"><defs><radialGradient id="cl1" cx="40%" cy="30%" r="75%"><stop offset="0" stop-color="#e38a5c"/><stop offset=".55" stop-color="#b8532c"/><stop offset="1" stop-color="#7d3218"/></radialGradient><radialGradient id="cl2" cx="40%" cy="30%" r="80%"><stop offset="0" stop-color="#d9784b"/><stop offset="1" stop-color="#8a3a1c"/></radialGradient></defs>
+<ellipse cx="52" cy="84" rx="36" ry="7" fill="#000" opacity=".22"/>
+<path d="M18 74 C14 56 22 38 38 30 C50 24 66 26 76 36 C88 47 88 66 80 76 C70 86 30 88 18 74 Z" fill="url(#cl1)" stroke="#6e2c14" stroke-width="1.5"/>
+<path d="M34 46 C40 42 48 42 52 46 M30 58 C38 54 50 55 56 60 M58 40 C64 38 70 41 72 46" fill="none" stroke="#8c3b1b" stroke-width="3.2" stroke-linecap="round" opacity=".7"/>
+<path d="M30 40 C36 34 46 31 54 32" fill="none" stroke="#f6b48e" stroke-width="3.5" stroke-linecap="round" opacity=".7"/>
+<path d="M70 74 C66 66 72 60 80 62 C88 64 90 74 84 78 C80 81 72 80 70 74 Z" fill="url(#cl2)" stroke="#6e2c14" stroke-width="1.2"/>
+<circle cx="76" cy="66" r="2.2" fill="#f6b48e" opacity=".7"/></svg>`;
 function cardHTML(r, { size = 'md', n = null, cls = '', at = '', tag = 'div', sub = '', extra = '', st = '' } = {}) {
   const I = RINFO[r];
-  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art"><span class="e">${I.e}</span></span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
+  return `<${tag} class="ck ${size} ${cls} ${n === 0 ? 'zero' : ''} ${n > 1 ? 'stack' : ''}" style="--c:${I.c};${st}" ${at}><span class="art">${r === 'brick' ? CLAY_SVG : `<span class="e">${I.e}</span>`}</span><span class="nm">${I.n}${sub ? `<small>${sub}</small>` : ''}</span>${n !== null ? `<span class="n">${n}</span>` : ''}${extra}</${tag}>`;
 }
 function backHTML({ size = 'md', cls = '', at = '', tag = 'div', extra = '', st = '' } = {}) {
   return `<${tag} class="ck back ${size} ${cls}" style="${st}" ${at}><span class="emb">⬡</span>${extra}</${tag}>`;

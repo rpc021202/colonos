@@ -145,7 +145,7 @@ function renderHUD() {
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
-    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${({ wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' })[r]}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
     ${diceHistHTML()}
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
@@ -157,7 +157,7 @@ function renderHUD() {
 }
 
 /* ---------- recursos volando y dados ---------- */
-const EMO = { wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️' };
+const EMO = { wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' };
 function flyResources(fx) {
   if (hudHidden) return;
   fx.forEach((f, i) => {

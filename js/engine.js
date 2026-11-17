@@ -4,11 +4,11 @@
 
 export const RES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 export const RINFO = {
-  wood: { n: 'Madera', e: '🌲', c: '#2f7d3a' },
+  wood: { n: 'Madera', e: '🪵', c: '#2f7d3a' },
   brick: { n: 'Arcilla', e: '🧱', c: '#c1592b' },
   sheep: { n: 'Lana', e: '🐑', c: '#7fb446' },
   wheat: { n: 'Trigo', e: '🌾', c: '#d9a21b' },
-  ore: { n: 'Piedra', e: '⛰️', c: '#6f7c8a' },
+  ore: { n: 'Piedra', e: '🪨', c: '#6f7c8a' },
   desert: { n: 'Desierto', e: '🏜️', c: '#d8c48f' },
 };
 export const COST = {
