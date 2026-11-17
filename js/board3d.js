@@ -744,14 +744,14 @@ export class Board3D {
     m.rotation.y = 0;
     const main = lands.slice().sort((a, b) => b.y - a.y)[0];
     const bld = m.children[0]; if (!bld) return;
-    const k = big ? 0.36 : 0.3;
-    bld.position.set((main.x - V.x) * k, 0, (main.y - V.y) * k);
+    const k = big ? 0.25 : 0.22;
+    bld.position.set((main.x - V.x) * k, WALL_H, (main.y - V.y) * k);
     bld.rotation.y = Math.atan2(V.x - main.x, V.y - main.y); // la fachada mira al cruce
     lands.filter((H) => H !== main).forEach((H) => {
       const dx = H.x - V.x, dz = H.y - V.y, l = Math.hypot(dx, dz), px = -dz / l, pz = dx / l;
       [-1, 1].concat(big ? [0] : []).forEach((sd) => {
         const w = walkerMesh(color, null); w.scale.setScalar(1.8);
-        w.position.set(dx * 0.27 + px * sd * 0.05, 0.005, dz * 0.27 + pz * sd * 0.05); w.rotation.y = Math.atan2(-dx, -dz) + sd * 0.4; m.add(w);
+        w.position.set(dx * 0.11 + px * sd * 0.05, 0.005, dz * 0.11 + pz * sd * 0.05); w.rotation.y = Math.atan2(-dx, -dz) + sd * 0.4; m.add(w);
       });
     });
   }
@@ -761,14 +761,14 @@ export class Board3D {
     const side = new THREE.Mesh(G_SIDE, new THREE.MeshStandardMaterial({ color: '#77736c', roughness: 0.9 })); side.scale.set(1, TOP + 0.36, 1); side.position.y = (TOP - 0.36) / 2;
     const top = barrioGround(h.res); land.add(side, top); g.add(land);
     const walls = barrioWalls(h.res); if (walls) land.add(walls);
-    const feat = new THREE.Group(); const blk = barrioBlock(h.res); feat.add(blk); g.add(feat);
+    const feat = new THREE.Group(); const blk = barrioBlock(h.res); if (h.res !== 'desert') blk.scale.set(1.3, 1.35, 1.3); feat.add(blk); g.add(feat);
     if (blk.userData.prop) (this.props = this.props || []).push(blk.userData.prop);
     let token = null;
     if (h.num) {
       token = new THREE.Group();
       const disc = new THREE.Mesh(TOKEN_GEO, TOKEN_MAT); disc.castShadow = true;
       const face = new THREE.Mesh(TOKEN_FACE, new THREE.MeshStandardMaterial({ map: tokenTex(h.num), roughness: 0.7 })); face.rotation.x = -Math.PI / 2; face.position.y = 0.026;
-      token.add(disc, face); token.scale.setScalar(0.8); token.userData.y0 = TOP + 0.05; token.position.set(0, token.userData.y0, 0.36);
+      token.add(disc, face); token.scale.setScalar(0.8); token.userData.y0 = TOP + WALL_H + 0.03; token.position.set(0, token.userData.y0, 0.5);
       g.add(token); this.tokens.push(token);
     }
     const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 0.98, 0.3, 6, 1, true), new THREE.MeshBasicMaterial({ color: '#fff6c2', transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
@@ -1516,13 +1516,14 @@ function drawLeaf(c, x, y, s, col, vein) {
 }
 // suelo de la manzana: asfalto en el borde (las calles), acera y solar
 // muro bajo de hormigón en cada lado de la manzana (donde se pintan los grafitis); las esquinas quedan libres
+const WALL_H = 0.17;
 function barrioWalls(res) {
   if (res === 'desert') return null;
-  const L = [], ap = 0.71, len = 0.48;
+  const L = [], ap = 0.7, len = 0.82;
   for (let i = 0; i < 6; i++) {
     const a = (Math.PI / 3) * i, x = Math.cos(a) * ap, z = Math.sin(a) * ap; // centro del lado (orientación de las casillas)
-    L.push(paint(G_BOX, i % 2 ? '#8d8a84' : '#85827c', M(x, TOP + 0.045, z, 0.022, 0.075, len, -a)));
-    L.push(paint(G_BOX, '#6f6c67', M(x, TOP + 0.085, z, 0.03, 0.008, len, -a)));
+    L.push(paint(G_BOX, i % 2 ? '#8d8a84' : '#85827c', M(x, TOP + WALL_H / 2, z, 0.024, WALL_H, len, -a)));
+    L.push(paint(G_BOX, '#6f6c67', M(x, TOP + WALL_H + 0.005, z, 0.034, 0.01, len, -a)));
   }
   const m = merged(L, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true })); m.castShadow = true; return m;
 }
@@ -1575,8 +1576,8 @@ function streetClaimMesh(color, len) {
   const style = Math.floor(Math.random() * GRAFF.length);
   [1, -1].forEach((sd, k) => {
     const tex = graffitiTex(color, (style + k) % GRAFF.length);
-    const pnl = new THREE.Mesh(new THREE.PlaneGeometry(0.48, 0.075), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }));
-    pnl.position.set(0, 0.045, sd * (0.866 - 0.71 - 0.013)); pnl.rotation.y = sd > 0 ? Math.PI : 0; g.add(pnl);
+    const pnl = new THREE.Mesh(new THREE.PlaneGeometry(0.78, WALL_H * 0.9), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }));
+    pnl.position.set(0, WALL_H / 2, sd * (0.866 - 0.7 - 0.014)); pnl.rotation.y = sd > 0 ? Math.PI : 0; g.add(pnl);
   });
   [-0.32, 0.32].forEach((x, i) => { const w = walkerMesh(color, null); w.scale.setScalar(1.7); w.position.set(x * len, 0.0, (i ? 1 : -1) * 0.135); w.rotation.y = i ? Math.PI - 0.5 : 0.5; w.userData.crew = true; g.add(w); });
   return g;
