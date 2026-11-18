@@ -569,6 +569,17 @@ function cityMesh(color) {
   T_(L, G_ICO0, '#4f7f30', 0.0, 0.03, 0.12, 0.028, 0.024, 0.028);
   return withWindows(L);
 }
+// Metrópolis: la ciudad con muralla alrededor, un torreón alto y cúpula dorada
+function metroMesh(color) {
+  const g = new THREE.Group(); g.add(cityMesh(color));
+  const L = [], stone = '#d8d0bf', stoneD = '#a59d8e';
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; T_(L, G_BOX, i % 2 ? stone : stoneD, Math.cos(a) * 0.21, 0.035, Math.sin(a) * 0.21, 0.16, 0.05, 0.03, -a + Math.PI / 2); T_(L, G_CYL8, stone, Math.cos(a + Math.PI / 8) * 0.22, 0.05, Math.sin(a + Math.PI / 8) * 0.22, 0.025, 0.1, 0.025); }
+  T_(L, G_CYL8, stone, 0.12, 0.2, 0.11, 0.055, 0.4, 0.055); T_(L, G_BOX, stoneD, 0.12, 0.41, 0.11, 0.075, 0.02, 0.075);
+  T_(L, G_SPH, '#e0b83c', 0.12, 0.45, 0.11, 0.05, 0.06, 0.05); T_(L, G_BOX, '#e0b83c', 0.12, 0.53, 0.11, 0.006, 0.06, 0.006);
+  T_(L, G_BOX, color, 0.12 + 0.025, 0.55, 0.11, 0.05, 0.03, 0.003);
+  for (let k = 0; k < 3; k++) T_(L, G_BOX, '#ffd98a', 0.12, 0.12 + k * 0.08, 0.11 + 0.056, 0.016, 0.03, 0.003);
+  g.add(withWindows(L)); return g;
+}
 // Camino: vigas + tablones sueltos (cada tablón cae por separado)
 function roadMesh(color, len, p) {
   if (THEME === 'barrio') return streetClaimMesh(color, len, NAMES[p]);
@@ -1340,16 +1351,25 @@ export class Board3D {
       const cur = this.pieces.v[v];
       if (cur && cur.userData.t === t && cur.userData.p === p) return;
       if (cur) this.root.remove(cur);
-      const m = t === 'c' ? cityMesh(colors[p]) : settlementMesh(colors[p]), V = B.verts[v];
+      const m = t === 'm' ? metroMesh(colors[p]) : t === 'c' ? cityMesh(colors[p]) : settlementMesh(colors[p]), V = B.verts[v];
       m.position.set(V.x, TOP, V.y); m.rotation.y = Math.atan2(V.x, V.y) + (Math.floor(Math.random() * 3) * Math.PI) / 3; m.userData = { t, p };
       if (this.theme === 'barrio') this.cornerize(m, v, colors[p], t === 'c');
       this.root.add(m); this.pieces.v[v] = m; this.drop(m);
     });
-    s.roads.forEach(([e, p]) => {
+    s.roads.forEach(([e, p, pv]) => {
       seenE.add(e);
-      if (this.pieces.e[e]) return;
+      const cur = this.pieces.e[e];
+      if (cur && cur.userData.p === p && !!cur.userData.pv === !!pv) return;
+      if (cur) this.root.remove(cur);
       const E = B.edges[e], a = B.verts[E.v[0]], b = B.verts[E.v[1]];
       const m = roadMesh(colors[p], Math.hypot(b.x - a.x, b.y - a.y) * 0.64, p);
+      m.userData.p = p; m.userData.pv = !!pv;
+      if (pv) { // calzada: losas de piedra bajo el camino
+        const len = Math.hypot(b.x - a.x, b.y - a.y) * 0.64, Lp = [];
+        for (let k = 0; k < 6; k++) Lp.push(paint(G_BOX, k % 2 ? '#a8a296' : '#bdb6a8', M(-len / 2 + (k + 0.5) * (len / 6), 0.008, 0, len / 6 - 0.006, 0.016, 0.15)));
+        Lp.push(paint(G_BOX, '#8d877d', M(0, 0.004, 0.083, len, 0.02, 0.014))); Lp.push(paint(G_BOX, '#8d877d', M(0, 0.004, -0.083, len, 0.02, 0.014)));
+        const pm = merged(Lp, MAT_()); pm.receiveShadow = true; m.add(pm);
+      }
       m.position.set((a.x + b.x) / 2, TOP, (a.y + b.y) / 2); m.rotation.y = -Math.atan2(b.y - a.y, b.x - a.x);
       this.root.add(m); this.pieces.e[e] = m; this.drop(m, true);
     });

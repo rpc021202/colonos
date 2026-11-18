@@ -10,7 +10,13 @@ export const RINFO = {
   wheat: { n: 'Trigo', e: '🌾', c: '#d9a21b' },
   ore: { n: 'Piedra', e: '🪨', c: '#6f7c8a' },
   desert: { n: 'Desierto', e: '🏜️', c: '#d8c48f' },
+  // reglas ampliadas: materiales fabricados (solo con una ciudad; cuentan 1 carta para el 7 y no se pueden robar ni descartar)
+  cloth: { n: 'Tela', e: '🧵', c: '#8e6bb8' },
+  tools: { n: 'Herramientas', e: '🔨', c: '#5d6d7e' },
+  cement: { n: 'Cemento', e: '🪣', c: '#9e9a92' },
 };
+export const GOODS = ['cloth', 'tools', 'cement'];
+export const RECIPE = { cloth: { sheep: 2, wheat: 1 }, tools: { wood: 2, ore: 2 }, cement: { brick: 2, ore: 1 } };
 // palabras que cambian con el tema (estética) de la partida; ver themes.js
 export const W = {
   settlement: 'poblado', city: 'ciudad', road: 'camino', ship: 'barco', robber: 'el ladrón', robberE: '🦹',
@@ -25,6 +31,11 @@ export const COST = {
   settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
   city: { wheat: 2, ore: 3 },
   dev: { sheep: 1, wheat: 1, ore: 1 },
+  // reglas ampliadas
+  shipUpX: { wood: 2, cloth: 1 },
+  metro: { tools: 2, cloth: 1, cement: 1, wheat: 1 },
+  pave: { cement: 1 },
+  moveRoad: { tools: 1 },
 };
 export const DEV = {
   knight: { n: 'Caballero', e: '⚔️', d: 'Mueve el ladrón y roba una carta. Se puede jugar antes de tirar.' },
@@ -33,6 +44,7 @@ export const DEV = {
   mono: { n: 'Monopolio', e: '💰', d: 'Elige un recurso: todos te dan los suyos.' },
   vp: { n: 'Punto de victoria', e: '⭐', d: '+1 punto. Secreto hasta el final.' },
   pirate: { n: 'Pirata', e: '🏴‍☠️', d: 'Roba 2 recursos a un jugador que tenga algún barco en el mar.' },
+  demolish: { n: 'Derribo', e: '🧨', d: 'Derribas un camino de otro (sin dejar caminos sueltos ni calzadas) y pones uno tuyo pagándolo.' },
 };
 export const COLORS = [
   { k: 'red', n: 'Rojo', c: '#e53935' }, { k: 'blue', n: 'Azul', c: '#1e88e5' },
@@ -267,6 +279,7 @@ export function newGame(opts) {
   const f = Math.max(1, np / 4);
   const devCounts = { knight: Math.round(14 * f), vp: 5 + Math.max(0, np - 6), road: Math.round(2 * f), plenty: Math.round(2 * f), mono: Math.round(2 * f) };
   if (opts.ships) devCounts.pirate = Math.round(2 * f);
+  if (opts.ext) devCounts.demolish = Math.round(2 * f);
   const deck = [];
   for (const k in devCounts) for (let i = 0; i < devCounts[k]; i++) deck.push(k);
   shuffle(deck);
@@ -276,8 +289,8 @@ export function newGame(opts) {
   const order = [...Array(np)].map((_, i) => (start + i) % np);
   const G = {
     v: 2, opts, N, bankN, board, bank, deck,
-    players: opts.players.map((p) => ({ name: p.name, color: p.color, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 }, dev: [], knights: 0, roads: 15, setts: 5, cities: 4, shipsLeft: 3 })),
-    ships: [], shipSeq: 0, islandClaim: {},
+    players: opts.players.map((p) => ({ name: p.name, color: p.color, res: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0, cloth: 0, tools: 0, cement: 0 }, dev: [], knights: 0, roads: 15, setts: 5, cities: 4, metros: 3, shipsLeft: 3 })),
+    ships: [], shipSeq: 0, islandClaim: {}, fleet: null, explorer: null,
     turn: start, first: start, turnNum: 0, phase: 'setup', setupIdx: 0, setupOrder: [...order, ...order.slice().reverse()], setupSub: 'settlement', lastSett: null,
     dice: null, rollId: 0, playedDev: false, longest: null, army: null, roadLens: Array(np).fill(0), log: [], winner: null,
     sbpQueue: [], discardQueue: [], afterRobber: null, rbLeft: 0, revealed: {}, stealCands: [], offer: null, ev: [],
@@ -307,6 +320,7 @@ export function winnerSpots(G, st) {
 export function log(G, m) { G.log.unshift(m); if (G.log.length > 60) G.log.length = 60; }
 export function pn(G, i) { return esc(G.players[i].name); }
 export function total(G, p) { return RES.reduce((s, r) => s + G.players[p].res[r], 0); }
+export function handCount(G, p) { const R = G.players[p].res; return total(G, p) + GOODS.reduce((s, k) => s + (R[k] || 0), 0); }
 export function actor(G) {
   if (G.phase === 'sbp') return G.sbpQueue[0];
   if (G.phase === 'discard') return G.discardQueue[0];
@@ -337,8 +351,8 @@ export function shipMoves(G, p, free) {
   });
   return out;
 }
-export function afford(G, p, c) { return Object.entries(c).every(([r, n]) => G.players[p].res[r] >= n); }
-function pay(G, p, c) { for (const [r, n] of Object.entries(c)) { G.players[p].res[r] -= n; G.bank[r] += n; } }
+export function afford(G, p, c) { return Object.entries(c).every(([r, n]) => (G.players[p].res[r] || 0) >= n); }
+function pay(G, p, c) { for (const [r, n] of Object.entries(c)) { G.players[p].res[r] -= n; if (RES.includes(r)) G.bank[r] += n; } }
 export function canSettleV(G, p, v, setup) {
   const V = G.board.verts[v];
   if (V.b || V.adj.some((a) => G.board.verts[a].b)) return false;
@@ -363,11 +377,15 @@ export const anySettSpot = (G, p) => G.board.verts.some((V) => canSettleV(G, p, 
 export const anyCitySpot = (G, p) => G.board.verts.some((V) => canCityV(G, p, V.id));
 export function vp(G, p, hidden) {
   let s = 0;
-  G.board.verts.forEach((V) => { if (V.b && V.b.p === p) s += V.b.t === 'c' ? 2 : 1; });
+  G.board.verts.forEach((V) => { if (V.b && V.b.p === p) s += V.b.t === 'm' ? 3 : V.b.t === 'c' ? 2 : 1; });
   if (G.longest === p) s += 2;
   if (G.army === p) s += 2;
+  if (G.fleet === p) s += 2;
   if (hidden) s += G.players[p].dev.filter((d) => d.t === 'vp').length;
-  for (const k in G.islandClaim || {}) if (G.islandClaim[k] === p) s += 1;
+  if (G.opts.ext) { // ampliadas: 1 punto por tener alguna isla y el Mayor descubridor (2) con 3 islas o más
+    if (islandsOf(G, p) > 0) s += 1;
+    if (G.explorer === p) s += 2;
+  } else for (const k in G.islandClaim || {}) if (G.islandClaim[k] === p) s += 1;
   return s;
 }
 export function rate(G, p, r) {
@@ -409,6 +427,7 @@ export function pirateTargets(G, p) { return G.players.map((_, q) => q).filter((
 export function canPlayDev(G, p, i) {
   const d = G.players[p].dev[i];
   if (d && d.t === 'pirate' && !pirateTargets(G, p).length) return false;
+  if (d && d.t === 'demolish' && !demolishTargets(G, p).length) return false;
   return p === G.turn && !!d && d.t !== 'vp' && !G.playedDev && d.bt < G.turnNum && G.winner === null &&
     (G.phase === 'main' || (G.phase === 'roll' && d.t === 'knight'));
 }
@@ -477,11 +496,58 @@ function checkWin(G) {
 }
 function placeSettlement(G, p, v) {
   G.board.verts[v].b = { p, t: 's' }; G.players[p].setts--; G.ev.push({ t: 'build', k: 's', id: v, p }); reveal(G, p); updateLongest(G);
-  if (G.opts.ships && G.phase !== 'setup') { // primera colonia en una isla nueva: +1 punto
+  if (G.opts.ships && G.opts.ext && G.phase !== 'setup') updateExplorer(G, p);
+  else if (G.opts.ships && G.phase !== 'setup') { // primera colonia en una isla nueva: +1 punto
     const isl = [...new Set(G.board.verts[v].hexes.map((h) => G.board.hexes[h].island).filter((i) => i > 0))];
     isl.forEach((k) => { if (G.islandClaim[k] === undefined) { G.islandClaim[k] = p; log(G, `⛵ <b>${pn(G, p)}</b> coloniza una isla nueva (+1 punto)`); G.ev.push({ t: 'banner', m: `⛵ ${G.players[p].name} coloniza una isla nueva (+1)` }); } });
   }
 }
+// --- reglas ampliadas ---
+export function islandsOf(G, p) {
+  const s = new Set();
+  G.board.verts.forEach((V) => { if (V.b && V.b.p === p) V.hexes.forEach((h) => { const i = G.board.hexes[h].island; if (i > 0) s.add(i); }); });
+  return s.size;
+}
+function updateExplorer(G, p) {
+  const n = islandsOf(G, p), cur = G.explorer;
+  if (n < 3 || cur === p || (cur !== null && islandsOf(G, cur) >= n)) return;
+  G.explorer = p; log(G, `🧭 <b>${pn(G, p)}</b> es el Mayor descubridor (${n} islas)`); G.ev.push({ t: 'banner', m: `🧭 ${G.players[p].name}: Mayor descubridor (+2)` });
+}
+function updateFleet(G, p) {
+  const n = (q) => (G.ships || []).filter((s) => s.p === q && (s.lv || 1) >= 2).length, cur = G.fleet;
+  if (n(p) < 3 || cur === p || (cur !== null && n(cur) >= n(p))) return;
+  G.fleet = p; log(G, `⚓ <b>${pn(G, p)}</b> consigue la Mayor flota (${n(p)} barcos mejorados)`); G.ev.push({ t: 'banner', m: `⚓ ${G.players[p].name}: Mayor flota (+2)` });
+}
+export const hasCity = (G, p) => G.board.verts.some((V) => V.b && V.b.p === p && (V.b.t === 'c' || V.b.t === 'm'));
+export function canMetroV(G, p, v) { const b = G.board.verts[v].b; return !!G.opts.ext && !!b && b.p === p && b.t === 'c'; }
+// ¿todos los caminos de q siguen unidos (aunque sea a través de otros caminos) a algún edificio suyo?
+export function roadsOK(G, q) {
+  const E = G.board.edges, V = G.board.verts, seen = new Set(), stack = [];
+  V.forEach((v) => { if (v.b && v.b.p === q) stack.push(v.id); });
+  const visited = new Set(stack);
+  while (stack.length) {
+    const v = stack.pop();
+    for (const e of V[v].edges) {
+      if (E[e].road !== q || seen.has(e)) continue;
+      seen.add(e);
+      const o = E[e].v[0] === v ? E[e].v[1] : E[e].v[0], b = V[o].b;
+      if (!visited.has(o) && !(b && b.p !== q)) { visited.add(o); stack.push(o); }
+    }
+  }
+  return E.every((e) => e.road !== q || seen.has(e.id));
+}
+const without = (G, e, fn) => { const E = G.board.edges[e], r = E.road; E.road = null; try { return fn(); } finally { E.road = r; } };
+export function demolishTargets(G, p) {
+  if (!G.opts.ext || G.players[p].roads <= 0 || !afford(G, p, COST.road)) return [];
+  // solo caminos ajenos sin empedrar, que al quitarlos no dejen sueltos otros caminos de su dueño, y donde tú puedas poner el tuyo
+  return G.board.edges.filter((E) => E.road !== null && E.road !== p && !E.paved).map((E) => E.id)
+    .filter((e) => { const q = G.board.edges[e].road; return without(G, e, () => roadsOK(G, q) && canRoadE(G, p, e)); });
+}
+export function moveRoadFrom(G, p) {
+  if (!G.opts.ext || G.players[p].roads > 0) return [];
+  return G.board.edges.filter((E) => E.road === p && without(G, E.id, () => roadsOK(G, p))).map((E) => E.id);
+}
+export function moveRoadTo(G, p, from) { return without(G, from, () => G.board.edges.filter((E) => E.id !== from && canRoadE(G, p, E.id)).map((E) => E.id)); }
 function placeCity(G, p, v) { G.board.verts[v].b.t = 'c'; G.players[p].setts++; G.players[p].cities--; G.ev.push({ t: 'build', k: 'c', id: v, p }); }
 function placeRoad(G, p, e) { G.board.edges[e].road = p; G.players[p].roads--; G.ev.push({ t: 'build', k: 'r', id: e, p }); reveal(G, p); updateLongest(G); }
 function produce(G, n) {
@@ -489,7 +555,7 @@ function produce(G, n) {
   B.hexes.forEach((h) => {
     if (h.num !== n || h.id === B.robber) return;
     hexes.push(h.id);
-    h.verts.forEach((v) => { const b = B.verts[v].b; if (b) { const k = b.t === 'c' ? 2 : 1; gains[b.p][h.res] = (gains[b.p][h.res] || 0) + k; fx.push({ h: h.id, v, p: b.p, r: h.res, n: k }); } });
+    h.verts.forEach((v) => { const b = B.verts[v].b; if (b) { const k = b.t === 'm' ? 3 : b.t === 'c' ? 2 : 1; gains[b.p][h.res] = (gains[b.p][h.res] || 0) + k; fx.push({ h: h.id, v, p: b.p, r: h.res, n: k }); } });
   });
   RES.forEach((r) => {
     const tot = gains.reduce((s, g) => s + (g[r] || 0), 0);
@@ -512,7 +578,7 @@ function produce(G, n) {
 function startSeven(G) {
   const n = G.players.length;
   G.discardQueue = [];
-  for (let i = 0; i < n; i++) { const p = (G.turn + i) % n; if (total(G, p) > 7) G.discardQueue.push(p); }
+  for (let i = 0; i < n; i++) { const p = (G.turn + i) % n; if (handCount(G, p) > 7 && total(G, p) > 0) G.discardQueue.push(p); }
   G.afterRobber = 'main';
   G.phase = G.discardQueue.length ? 'discard' : 'robber';
   if (G.phase === 'robber') skipRobberIfNoTarget(G);
@@ -645,10 +711,69 @@ export function act(G, p, a) {
       if (!sh) return 'Ese barco no es tuyo';
       if ((sh.lv || 1) >= 2) return 'Ese barco ya está mejorado';
       if (!upgradableShips(G, p).includes(sh)) return 'El barco tiene que estar atracado en un poblado o ciudad tuya';
-      if (!afford(G, p, COST.shipUp)) return 'No tienes recursos suficientes';
-      pay(G, p, COST.shipUp); sh.lv = 2;
+      const cU = G.opts.ext ? COST.shipUpX : COST.shipUp;
+      if (!afford(G, p, cU)) return 'No tienes recursos suficientes';
+      pay(G, p, cU); sh.lv = 2;
+      if (G.opts.ext) { updateFleet(G, p); checkWin(G); }
       G.ev.push({ t: 'build', k: 'b', id: sh.e, p, ship: sh.id });
       log(G, `⛵ <b>${pn(G, p)}</b> ${W.upShip}`);
+      return null;
+    }
+    case 'craft': {
+      const k = a.k;
+      if (!G.opts.ext || !GOODS.includes(k)) return 'No se puede fabricar eso';
+      if (!isActor || !['main', 'sbp'].includes(G.phase)) return 'Solo en tu turno';
+      if (!hasCity(G, p)) return 'Necesitas al menos una ciudad para fabricar';
+      if (!afford(G, p, RECIPE[k])) return 'No tienes recursos suficientes';
+      pay(G, p, RECIPE[k]); me.res[k]++;
+      log(G, `<b>${pn(G, p)}</b> fabrica ${RINFO[k].e} ${RINFO[k].n.toLowerCase()}`);
+      return null;
+    }
+    case 'sell': {
+      const k = a.k, get = a.get;
+      if (!G.opts.ext || !GOODS.includes(k) || !RES.includes(get)) return 'Cambio no válido';
+      if (!isActor || G.phase !== 'main') return 'Solo en tu turno';
+      if (!me.res[k]) return 'No tienes eso';
+      if (G.bank[get] < 1) return 'El banco no tiene ese recurso';
+      me.res[k]--; me.res[get]++; G.bank[get]--;
+      log(G, `<b>${pn(G, p)}</b> cambia 1${RINFO[k].e} por 1${RINFO[get].e} con el banco`);
+      return null;
+    }
+    case 'metro': {
+      const v = a.v | 0;
+      if (!isActor || !['main', 'sbp'].includes(G.phase)) return 'Ahora no puedes construir';
+      if (!G.board.verts[v] || !canMetroV(G, p, v)) return 'Ahí no hay una ciudad tuya';
+      if ((me.metros ?? 3) <= 0) return 'Ya tienes 3 metrópolis';
+      if (!afford(G, p, COST.metro)) return 'No tienes recursos suficientes';
+      pay(G, p, COST.metro); G.board.verts[v].b.t = 'm'; me.cities++; me.metros = (me.metros ?? 3) - 1;
+      G.ev.push({ t: 'build', k: 'm', id: v, p });
+      log(G, `🏙️ <b>${pn(G, p)}</b> convierte una ciudad en metrópolis`); G.ev.push({ t: 'banner', m: `🏙️ ${G.players[p].name} levanta una metrópolis` });
+      checkWin(G); return null;
+    }
+    case 'pave': {
+      const e = a.e | 0, E = G.board.edges[e];
+      if (!G.opts.ext || !E) return 'No válido';
+      if (!isActor || !['main', 'sbp'].includes(G.phase)) return 'Ahora no puedes construir';
+      if (E.road !== p || E.paved) return 'Tiene que ser un camino tuyo sin empedrar';
+      if (!afford(G, p, COST.pave)) return 'Necesitas cemento';
+      pay(G, p, COST.pave); E.paved = true;
+      G.ev.push({ t: 'build', k: 'pave', id: e, p });
+      log(G, `<b>${pn(G, p)}</b> empiedra un camino (ya no se puede derribar)`);
+      return null;
+    }
+    case 'moveRoad': {
+      const from = a.from | 0, to = a.to | 0;
+      if (!G.opts.ext || !isActor || G.phase !== 'main') return 'Solo en tu turno';
+      if (me.roads > 0) return 'Solo cuando ya has puesto todos tus caminos';
+      if (!afford(G, p, COST.moveRoad)) return 'Necesitas herramientas';
+      if (!moveRoadFrom(G, p).includes(from)) return 'Ese camino no se puede mover sin dejar otros sueltos';
+      if (!moveRoadTo(G, p, from).includes(to)) return 'El camino tiene que conectar con lo tuyo';
+      const E1 = G.board.edges[from], E2 = G.board.edges[to], pv = !!E1.paved;
+      E1.road = null; E1.paved = false; E2.road = p; E2.paved = pv;
+      if (!roadsOK(G, p)) { E2.road = null; E2.paved = false; E1.road = p; E1.paved = pv; return 'Dejarías caminos sueltos'; }
+      pay(G, p, COST.moveRoad);
+      G.ev.push({ t: 'build', k: 'r', id: to, p, from });
+      log(G, `<b>${pn(G, p)}</b> mueve un camino`); reveal(G, p); updateLongest(G); checkWin(G);
       return null;
     }
     case 'roll': {
@@ -662,7 +787,7 @@ export function act(G, p, a) {
     }
     case 'discard': {
       if (G.phase !== 'discard' || !G.discardQueue.includes(p)) return 'No tienes que descartar';
-      const need = Math.floor(total(G, p) / 2), sel = a.sel || {};
+      const need = Math.min(total(G, p), Math.floor(handCount(G, p) / 2)), sel = a.sel || {};
       let sum = 0;
       for (const r of RES) { const n = sel[r] | 0; if (n < 0 || n > me.res[r]) return 'Selección no válida'; sum += n; }
       if (sum !== need) return `Tienes que descartar ${need}`;
@@ -724,6 +849,7 @@ export function act(G, p, a) {
       }
       if (d.t === 'mono' && !RES.includes(a.r)) return 'Elige un recurso';
       if (d.t === 'pirate' && !pirateTargets(G, p).includes(a.q)) return 'Elige un jugador con barcos';
+      if (d.t === 'demolish' && !demolishTargets(G, p).includes(a.e | 0)) return 'Ese camino no se puede derribar';
       me.dev.splice(i, 1); G.playedDev = true;
       log(G, `<b>${pn(G, p)}</b> juega ${DEV[d.t].e} ${DEV[d.t].n}`);
       G.ev.push({ t: 'banner', m: `${DEV[d.t].e} ${G.players[p].name} juega ${DEV[d.t].n}` });
@@ -735,6 +861,14 @@ export function act(G, p, a) {
         log(G, `🏴‍☠️ <b>${pn(G, p)}</b> asalta los barcos de <b>${pn(G, q)}</b> y le roba ${got.length} cartas`);
         stats(G).stole[p] += got.length; stats(G).lost[q] += got.length;
         G.ev.push({ t: 'gain', to: p, m: `Botín pirata: ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'gain', to: q, m: `¡Piratas! Te roban ${got.map((r) => RINFO[r].e).join(' ')}` }, { t: 'pirate', p, q });
+      }
+      else if (d.t === 'demolish') {
+        const e = a.e | 0, E = G.board.edges[e], q = E.road;
+        G.players[q].roads++; pay(G, p, COST.road); E.road = p; me.roads--;
+        G.ev.push({ t: 'build', k: 'r', id: e, p, demolish: q });
+        log(G, `🧨 <b>${pn(G, p)}</b> derriba un camino de <b>${pn(G, q)}</b> y pone uno suyo`);
+        G.ev.push({ t: 'gain', to: q, m: `🧨 ${G.players[p].name} te ha derribado un camino` });
+        updateLongest(G); checkWin(G);
       }
       else if (d.t === 'plenty') { a.list.slice(0, 2).forEach((r) => { G.bank[r]--; me.res[r]++; }); log(G, `<b>${pn(G, p)}</b> coge ${a.list.slice(0, 2).map((r) => RINFO[r].e).join(' ')} del banco`); }
       else if (d.t === 'mono') {
@@ -846,12 +980,12 @@ export function publicState(G, forP) {
     deckN: G.deck.length, knightSteal: !!G.knightSteal, stealQ: G.stealQ ?? null, stealSel: G.stealSel ?? null, stealN: G.stealDeck ? G.stealDeck.length : 0,
     stealMine: G.stealDeck && forP === G.stealQ ? G.stealDeck : null, // la víctima ve sus cartas de cara
     stats: G.winner !== null ? { ...stats(G), rolls: G.rolls || [] } : null,
-    stealHands: G.phase === 'steal' && G.knightSteal && forP === G.turn ? Object.fromEntries(G.stealCands.map((q) => [q, { ...G.players[q].res }])) : null, bank: G.bank, log: G.log.slice(0, 30), opts: { fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands, theme: G.opts.theme || 'classic' },
-    ships: G.ships || [], islandClaim: G.islandClaim || {},
+    stealHands: G.phase === 'steal' && G.knightSteal && forP === G.turn ? Object.fromEntries(G.stealCands.map((q) => [q, { ...G.players[q].res }])) : null, bank: G.bank, log: G.log.slice(0, 30), opts: { ext: !!G.opts.ext, fog: G.opts.fog, target: G.opts.target, sbp: G.opts.sbp, ships: !!G.opts.ships, openHands: !!G.opts.openHands, theme: G.opts.theme || 'classic' },
+    ships: G.ships || [], islandClaim: G.islandClaim || {}, fleet: G.fleet ?? null, explorer: G.explorer ?? null,
     buildings: B.verts.filter((v) => v.b).map((v) => [v.id, v.b.p, v.b.t]),
-    roads: B.edges.filter((e) => e.road !== null).map((e) => [e.id, e.road]),
+    roads: B.edges.filter((e) => e.road !== null).map((e) => (e.paved ? [e.id, e.road, 1] : [e.id, e.road])),
     players: G.players.map((P, i) => ({
-      name: P.name, color: P.color, n: total(G, i), devN: P.dev.length, knights: P.knights, roads: P.roads, setts: P.setts, cities: P.cities, shipsLeft: P.shipsLeft,
+      name: P.name, color: P.color, n: handCount(G, i), metros: P.metros ?? 3, devN: P.dev.length, knights: P.knights, roads: P.roads, setts: P.setts, cities: P.cities, shipsLeft: P.shipsLeft,
       vp: vp(G, i, G.winner !== null || i === forP),
       res: i === forP || G.opts.openHands ? P.res : null, dev: i === forP ? P.dev : null,
     })),
@@ -863,8 +997,8 @@ export function mirror(staticBoard, s) {
   board.verts.forEach((v) => (v.b = null));
   board.edges.forEach((e) => (e.road = null));
   s.buildings.forEach(([v, p, t]) => (board.verts[v].b = { p, t }));
-  s.roads.forEach(([e, p]) => (board.edges[e].road = p));
+  s.roads.forEach(([e, p, pv]) => { board.edges[e].road = p; board.edges[e].paved = !!pv; });
   board.robber = s.robber;
-  const players = s.players.map((P) => ({ ...P, res: P.res || { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 }, dev: P.dev || [] }));
+  const players = s.players.map((P) => ({ ...P, res: P.res || { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0, cloth: 0, tools: 0, cement: 0 }, dev: P.dev || [] }));
   return { ...s, board, players, revealed: s.revealed, opts: s.opts, longest: s.longest, army: s.army };
 }

@@ -1,6 +1,6 @@
 // Mando del jugador (móvil): una sola pantalla con el mapa 3D, la mano abajo, los rivales arriba
 // y los menús de construir / comerciar / partida a un lado. Funciona en horizontal y en vertical.
-import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets, upgradableShips, winnerSpots } from './engine.js';
+import { RES, RINFO, COST, DEV, COLORS, esc, fmt, mirror, targets, afford, canPlayDev, rate, actor, vp, canRoadE, canBuildShipE, shipMoves, pirateTargets, upgradableShips, winnerSpots, GOODS, RECIPE, demolishTargets, moveRoadFrom, moveRoadTo, canMetroV, hasCity } from './engine.js';
 import { joinRoom, unpack } from './net.js';
 import { startRelay } from './relay.js';
 import { Board3D } from './board3d.js';
@@ -43,7 +43,7 @@ function send(a) { if (!net || !net.send({ t: 'act', a })) toast('Sin conexión 
 const cost = (c) => Object.entries(c).map(([r, n]) => RINFO[r].e.repeat(n)).join('');
 // coste con las cartas que te faltan apagadas
 const costHave = (c, res) => Object.entries(c).flatMap(([r, n]) => [...Array(n)].map((_, i) => (i < res[r] ? RINFO[r].e : `<i>${RINFO[r].e}</i>`))).join('');
-const sumRes = (o) => RES.reduce((s, r) => s + (o[r] || 0), 0);
+const sumRes = (o) => RES.concat(GOODS).reduce((s, r) => s + (o[r] || 0), 0);
 const bl = (k, ic, n) => ((ui('build') || {})[k] || [ic, n]); // nombre e icono de cada construcción según el tema
 /* ---------- cartas (como las de la caja) ---------- */
 // tag: 'div' o 'button'; at: atributos extra; n: número en la esquina; sub: texto pequeño bajo el nombre
@@ -182,7 +182,7 @@ function autoState() {
   const key = G.phase + G.setupIdx + G.turnNum + (G.setupSub || '') + actor(G);
   if (key !== U.autoKey) { U.sel = null; if (G.phase !== 'main' && G.phase !== 'sbp') U.mode = null; }
   U.autoKey = key;
-  if (!canBuildNow()) U.mode = null;
+  if (!canBuildNow() && U.mode !== 'demolish') U.mode = null;
   if (G.phase !== 'steal') U.stealQ = null;
 }
 const canBuildNow = () => { const G = U.G; return G && G.winner === null && ['main', 'sbp'].includes(G.phase) && actor(G) === U.me; };
@@ -207,7 +207,17 @@ function glow() {
   if (want('road') && afford(G, me, COST.road) && P.roads > 0) out.road = targets(G, me, 'road').e;
   if (G.opts.ships && want('ship') && afford(G, me, COST.ship) && P.shipsLeft > 0) out.ship = targets(G, me, 'ship').e;
   if (G.opts.ships && want('move') && G.phase === 'main' && G.turn === me) out.move = shipMoves(G, me, false).map((m) => m.to);
-  if (U.mode === 'upship' && G.phase === 'main' && afford(G, me, COST.shipUp)) out.up = upgradableShips(G, me).map((x) => x.e);
+  if (U.mode === 'upship' && G.phase === 'main' && afford(G, me, G.opts.ext ? COST.shipUpX : COST.shipUp)) out.up = upgradableShips(G, me).map((x) => x.e);
+  // reglas ampliadas
+  out.metroV = []; out.pave = []; out.mvf = []; out.mvt = []; out.dem = [];
+  if (G.opts.ext) {
+    if (want('metro') && afford(G, me, COST.metro) && (P.metros ?? 3) > 0) out.metroV = G.board.verts.filter((V) => canMetroV(G, me, V.id)).map((V) => V.id);
+    if (U.mode === 'pave' && afford(G, me, COST.pave)) out.pave = G.board.edges.filter((E) => E.road === me && !E.paved).map((E) => E.id);
+    if (U.mode === 'mvfrom' && G.phase === 'main' && afford(G, me, COST.moveRoad)) out.mvf = moveRoadFrom(G, me);
+    if (U.mode === 'mvto' && U.mvFrom != null) out.mvt = moveRoadTo(G, me, U.mvFrom);
+    if (U.mode === 'demolish') out.dem = demolishTargets(G, me);
+    add(out.v, out.metroV); add(out.e, out.pave); add(out.e, out.mvf); add(out.e, out.mvt); add(out.e, out.dem);
+  }
   add(out.e, out.up);
   add(out.v, out.sett); add(out.v, out.cityV);
   add(out.e, out.road); add(out.e, out.ship); add(out.e, out.move);
@@ -220,7 +230,8 @@ function optionsFor(sel) {
   if (!G || !sel) return o;
   if (sel.k === 'h' && O.h.includes(sel.id)) o.push({ l: `${W.robberE} Mandar a ${W.robber} aquí`, a: { t: 'robber', h: sel.id } });
   if (sel.k === 'v' && O.v.includes(sel.id)) {
-    if (O.cityV.includes(sel.id)) o.push({ l: bl('city', '🏰', 'Ciudad').join(' '), c: COST.city, a: { t: 'city', v: sel.id } });
+    if ((O.metroV || []).includes(sel.id)) o.push({ l: '🏙️ Metrópolis (3 pts, cobra 3)', c: COST.metro, a: { t: 'metro', v: sel.id } });
+    else if (O.cityV.includes(sel.id)) o.push({ l: bl('city', '🏰', 'Ciudad').join(' '), c: COST.city, a: { t: 'city', v: sel.id } });
     else o.push({ l: bl('settlement', '🏠', 'Poblado').join(' '), c: G.phase === 'setup' ? null : COST.settlement, a: { t: 'settle', v: sel.id } });
   }
   if (sel.k === 'e' && O.e.includes(sel.id)) {
@@ -228,7 +239,11 @@ function optionsFor(sel) {
     if (O.road.includes(sel.id)) o.push({ l: bl('road', '🛤️', 'Camino').join(' '), c: rb || su ? null : COST.road, a: { t: 'road', e: sel.id }, free: rb });
     if (O.ship.includes(sel.id) && canBuildShipE(G, me, sel.id)) o.push({ l: bl('ship', '⛵', 'Barco').join(' '), c: COST.ship, a: { t: 'ship', e: sel.id } });
     if (O.move.includes(sel.id)) o.push({ l: '🧭 Navegar aquí', a: { t: 'moveShip', to: sel.id }, free: true });
-    if (O.up.includes(sel.id)) o.push({ l: bl('upship', '⛵', 'Mejorar barco').join(' '), c: COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
+    if (O.up.includes(sel.id)) o.push({ l: bl('upship', '⛵', 'Mejorar barco').join(' '), c: G.opts.ext ? COST.shipUpX : COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
+    if ((O.pave || []).includes(sel.id)) o.push({ l: '🪨 Calzada (no se puede derribar)', c: COST.pave, a: { t: 'pave', e: sel.id } });
+    if ((O.mvf || []).includes(sel.id)) o.push({ l: '↪️ Mover este camino', a: { t: '_mvfrom', e: sel.id }, free: true });
+    if ((O.mvt || []).includes(sel.id)) o.push({ l: '↪️ Ponerlo aquí', c: COST.moveRoad, a: { t: 'moveRoad', from: U.mvFrom, to: sel.id } });
+    if ((O.dem || []).includes(sel.id)) o.push({ l: '🧨 Derribar y poner el tuyo', c: COST.road, a: { t: 'playDev', i: U.devI, e: sel.id } });
   }
   return o;
 }
@@ -343,7 +358,7 @@ function phaseLine(G) {
   if (U.hostGone) return '⏳ Recuperando la partida…';
   if (G.winner !== null) return `🏆 ¡${esc(G.players[G.winner].name)} gana!`;
   const me = U.me, a = actor(G), mine = a === me;
-  if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco', upship: 'Toca el barco que mejoras' }[U.mode];
+  if (U.mode && canBuildNow()) return { road: 'Toca dónde va el camino', settlement: 'Toca dónde va el poblado', city: 'Toca el poblado que mejoras', ship: 'Toca dónde botas el barco', move: 'Toca a dónde navega tu barco', upship: 'Toca el barco que mejoras', metro: 'Toca la ciudad que mejoras', pave: 'Toca el camino que empiedras', mvfrom: 'Toca el camino que quieres mover', mvto: 'Toca dónde lo pones', demolish: 'Toca el camino que derribas' }[U.mode];
   switch (G.phase) {
     case 'setup': return mine ? (G.setupSub === 'settlement' ? 'Toca dónde pones tu poblado' : 'Toca dónde va tu camino') : `${esc(G.players[a].name)} está colocando`;
     case 'roll': return mine ? ui('yourTurnRoll') || 'Te toca: tira los dados' : `Turno de ${esc(G.players[a].name)}`;
@@ -372,7 +387,7 @@ function gameHTML() {
     if (i === me) return '';
     let st = '';
     if (O && O.from === me && (O.to == null || O.to === i)) st = O.acc[i] ? '<em class="ok">✓</em>' : O.rej[i] ? '<em class="no">✕</em>' : '<em>…</em>';
-    return `<button class="rv ${G.turn === i ? 'turn' : ''} ${U.panel === 'trade' && U.tradeTo === i ? 'tap' : ''}" data-a="rival" data-q="${i}"><span class="av" style="background:${Q.color}">${esc((Q.name || '?')[0])}</span><span class="nm">${esc(Q.name)}</span><span class="st">⭐${Q.vp} · 🂠${Q.n}${G.army === i ? ' ⚔️' : ''}${G.longest === i ? ' 🛣️' : ''}</span>${st}</button>`;
+    return `<button class="rv ${G.turn === i ? 'turn' : ''} ${U.panel === 'trade' && U.tradeTo === i ? 'tap' : ''}" data-a="rival" data-q="${i}"><span class="av" style="background:${Q.color}">${esc((Q.name || '?')[0])}</span><span class="nm">${esc(Q.name)}</span><span class="st">⭐${Q.vp} · 🂠${Q.n}${G.army === i ? ' ⚔️' : ''}${G.longest === i ? ' 🛣️' : ''}${G.fleet === i ? ' ⚓' : ''}${G.explorer === i ? ' 🧭' : ''}</span>${st}</button>`;
   }).join('')}</div>`;
   if (line) h += `<div id="hint">${line}${U.mode && canBuildNow() ? ' <button data-a="cancelmode">✕</button>' : ''}</div>`;
   h += `<div id="rail">
@@ -400,14 +415,14 @@ function actionHTML() {
 }
 function handHTML() {
   const P = U.G.players[U.me], n = sumRes(P.res);
-  const cards = RES.filter((r) => P.res[r]).map((r) => cardHTML(r, { size: 'md', n: P.res[r] })).join('');
+  const cards = RES.concat(U.G.opts.ext ? GOODS : []).filter((r) => P.res[r]).map((r) => cardHTML(r, { size: 'md', n: P.res[r] })).join('');
   const devs = P.dev.map((d) => devCardHTML(d.t, { size: 'md' })).join('');
   return `<button id="hand" data-a="hand">${cards || (devs ? '' : '<span class="empty">Sin cartas</span>')}${cards && devs ? '<span class="gap"></span>' : ''}${devs}${n ? `<span class="tot">${n}</span>` : ''}</button>`;
 }
 function handOpenHTML() {
   const G = U.G, P = G.players[U.me];
   return `<div id="veil" data-a="handclose"></div><div id="fantitle">Tu mano · ${sumRes(P.res)} cartas<span>toca fuera para cerrar</span></div>
-  <div id="fan">${RES.map((r) => cardHTML(r, { size: 'lg', n: P.res[r] })).join('')}
+  <div id="fan">${RES.map((r) => cardHTML(r, { size: 'lg', n: P.res[r] })).join('')}${G.opts.ext ? GOODS.filter((k) => P.res[k]).map((k) => cardHTML(k, { size: 'lg', n: P.res[k] })).join('') : ''}
   ${P.dev.length ? '<span class="sp"></span>' : ''}${P.dev.map((d, i) => {
     const can = d.t !== 'vp' && canPlayDev(G, U.me, i), fresh = d.bt >= G.turnNum && d.t !== 'vp';
     return devCardHTML(d.t, { size: 'lg', extra: d.t === 'vp' ? '<span class="tag">secreta</span>' : can ? `<button class="play" data-a="dev" data-i="${i}">Jugar</button>` : `<span class="tag">${fresh ? 'recién comprada' : 'ahora no'}</span>` });
@@ -417,14 +432,20 @@ function buildPanel() {
   const G = U.G, me = U.me, P = G.players[me], can = canBuildNow();
   const rows = [['road', ...bl('road', '🛤️', 'Camino'), COST.road, P.roads > 0 && targets(G, me, 'road').e.length], ['settlement', ...bl('settlement', '🏠', 'Poblado'), COST.settlement, P.setts > 0 && targets(G, me, 'settlement').v.length], ['city', ...bl('city', '🏰', 'Ciudad'), COST.city, P.cities > 0 && targets(G, me, 'city').v.length]];
   if (G.opts.ships) rows.push(['ship', ...bl('ship', '⛵', 'Barco'), COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
-  if (G.opts.ships) rows.push(['upship', ...bl('upship', '⛵⛵', 'Mejorar barco (2 tramos)'), COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
+  if (G.opts.ships) rows.push(['upship', ...bl('upship', '⛵⛵', 'Mejorar barco (2 tramos)'), G.opts.ext ? COST.shipUpX : COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
+  if (G.opts.ext) {
+    rows.push(['metro', '🏙️', 'Metrópolis (3 pts, cobra 3)', COST.metro, (P.metros ?? 3) > 0 && G.board.verts.some((V) => canMetroV(G, me, V.id))]);
+    rows.push(['pave', '🪨', 'Calzada (no se derriba)', COST.pave, G.board.edges.some((E) => E.road === me && !E.paved)]);
+    rows.push(['mvfrom', '↪️', 'Mover un camino (con los 15 puestos)', COST.moveRoad, G.phase === 'main' && moveRoadFrom(G, me).length]);
+  }
   rows.push(['dev', ...bl('dev', '🃏', 'Carta de desarrollo'), COST.dev, G.deckN > 0]);
   const tag = (ok, room) => (!can ? '' : ok && room ? '<span class="tag y">sí</span>' : ok ? '<span class="tag">sin sitio</span>' : '<span class="tag">falta</span>');
   return `<h3>Construir <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${rows.map(([k, ic, n, c, room]) => { const ok = afford(G, me, c); return `<button class="br ${can && ok && room ? 'ok' : 'no'}" data-a="brow" data-k="${k}" ${can && ok && room ? '' : 'disabled'}><span class="ic">${ic}</span><span class="nm">${n}</span><span class="cost">${costHave(c, P.res)}</span>${tag(ok, room)}</button>`; }).join('')}
+    ${G.opts.ext ? `<div class="lb" style="margin-top:8px">Fabricar ${hasCity(G, me) ? '' : '<small>(necesitas una ciudad)</small>'}</div>${GOODS.map((k) => { const ok = can && hasCity(G, me) && afford(G, me, RECIPE[k]); return `<button class="br ${ok ? 'ok' : 'no'}" data-a="craft" data-k="${k}" ${ok ? '' : 'disabled'}><span class="ic">${RINFO[k].e}</span><span class="nm">${RINFO[k].n} <small>tienes ${P.res[k] || 0}</small></span><span class="cost">${costHave(RECIPE[k], P.res)}</span></button>`; }).join('')}<div class="note">Lo fabricado cuenta 1 carta para el 7, no te lo pueden robar y no se descarta.</div>` : ''}
     ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos navegan gratis: 1 tramo por turno, 2 si están mejorados. Toca uno azul en el mapa. Para mejorar un barco tiene que estar atracado en un poblado o ciudad tuya.</div>' : ''}
     <div class="note">${can ? 'Toca una fila para ver solo esos sitios en el mapa.' : 'Solo puedes construir en tu turno, después de tirar.'}<br>Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades${G.opts.ships ? ` · ${P.shipsLeft} barcos` : ''} · ${G.deckN} cartas en el mazo</div>
-    <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
+    <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ext ? ' · Metrópolis 3 pts · Mayor flota (3 barcos mejorados) 2 pts' + (G.opts.ships ? ' · Tener isla 1 pt · Mayor descubridor (3 islas) 2 pts' : '') : G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
 }
 function counter(obj, key, max) {
   return `<div class="cnt">${RES.map((r) => `<div class="c ${obj[r] ? '' : 'z'}" style="background:${RINFO[r].c}"><button class="up" data-a="cnt" data-k="${key}" data-r="${r}" data-d="1" ${max && (obj[r] || 0) >= max[r] ? 'disabled' : ''}><span>${RINFO[r].e}</span>${obj[r] || 0}</button><button class="dn" data-a="cnt" data-k="${key}" data-r="${r}" data-d="-1" ${(obj[r] || 0) <= 0 ? 'disabled' : ''}>−</button></div>`).join('')}</div>`;
@@ -454,9 +475,9 @@ function tradePanel() {
       <button class="primary wide" data-a="offer" ${ok ? '' : 'disabled'}>${Q ? 'Enviar a ' + esc(Q.name) : 'Ofrecer a todos'}</button>`;
   }
   const bk = U.bank;
-  o += `<div class="lb">Banco y puertos</div><div class="pick">${RES.map((r) => { const k = rate(G, me, r); return `<button class="${bk.give === r ? 'on' : ''}" data-a="bgive" data-r="${r}" ${P.res[r] >= k ? '' : 'disabled'}><span>${RINFO[r].e}</span>${k}:1</button>`; }).join('')}</div>
+  o += `<div class="lb">Banco y puertos</div><div class="pick">${RES.concat(G.opts.ext ? GOODS.filter((k2) => P.res[k2]) : []).map((r) => { const k = GOODS.includes(r) ? 1 : rate(G, me, r); return `<button class="${bk.give === r ? 'on' : ''}" data-a="bgive" data-r="${r}" ${P.res[r] >= k ? '' : 'disabled'}><span>${RINFO[r].e}</span>${k}:1</button>`; }).join('')}</div>
     <div class="pick">${RES.map((r) => `<button class="${bk.get === r ? 'on' : ''}" data-a="bget" data-r="${r}" ${G.bank[r] > 0 && r !== bk.give ? '' : 'disabled'}><span>${RINFO[r].e}</span>→1</button>`).join('')}</div>
-    <button class="primary wide" data-a="bankdo" ${bk.give && bk.get && bk.give !== bk.get ? '' : 'disabled'}>Cambiar ${bk.give ? rate(G, me, bk.give) + RINFO[bk.give].e : ''} ${bk.get ? '→ 1' + RINFO[bk.get].e : ''}</button></div>`;
+    <button class="primary wide" data-a="bankdo" ${bk.give && bk.get && bk.give !== bk.get ? '' : 'disabled'}>Cambiar ${bk.give ? (GOODS.includes(bk.give) ? 1 : rate(G, me, bk.give)) + RINFO[bk.give].e : ''} ${bk.get ? '→ 1' + RINFO[bk.get].e : ''}</button></div>`;
   return o;
 }
 function menuPanel() {
@@ -556,10 +577,13 @@ document.addEventListener('click', (e) => {
     case 'brow':
       if (d.k === 'dev') { send({ t: 'buyDev' }); break; }
       U.mode = d.k; U.panel = null; U.sel = null; render(); break;
-    case 'cancelmode': U.mode = null; U.sel = null; render(); break;
+    case 'cancelmode': U.mode = null; U.sel = null; U.mvFrom = null; render(); break;
+    case 'craft': send({ t: 'craft', k: d.k }); break;
+    case 'sell': send({ t: 'sell', k: d.k, get: d.r }); break;
     case 'do': {
       const o = optionsFor(U.sel)[+d.i]; U.sel = null;
-      if (o) { send(o.a); if (G.phase !== 'roadbuild') U.mode = null; }
+      if (o && o.a.t === '_mvfrom') { U.mvFrom = o.a.e; U.mode = 'mvto'; render(); break; }
+      if (o) { send(o.a); if (G.phase !== 'roadbuild') U.mode = null; U.mvFrom = null; }
       render(); break;
     }
     case 'dev': {
@@ -567,6 +591,7 @@ document.addEventListener('click', (e) => {
       if (card.t === 'plenty') U.modal = { t: 'plenty', i: +d.i, pick: [] };
       else if (card.t === 'mono') U.modal = { t: 'mono', i: +d.i };
       else if (card.t === 'pirate') U.modal = { t: 'pirate', i: +d.i };
+      else if (card.t === 'demolish') { U.mode = 'demolish'; U.devI = +d.i; U.panel = null; U.sel = null; }
       else send({ t: 'playDev', i: +d.i });
       render(); break;
     }
@@ -590,7 +615,7 @@ document.addEventListener('click', (e) => {
     case 'stealrepick': U.S.stealQ = null; U.S.stealN = 0; render(); break;
     case 'bgive': U.bank.give = d.r; if (U.bank.get === d.r) U.bank.get = null; render(); break;
     case 'bget': U.bank.get = d.r; render(); break;
-    case 'bankdo': send({ t: 'bank', give: U.bank.give, get: U.bank.get }); U.bank = { give: null, get: null }; break;
+    case 'bankdo': send(GOODS.includes(U.bank.give) ? { t: 'sell', k: U.bank.give, get: U.bank.get } : { t: 'bank', give: U.bank.give, get: U.bank.get }); U.bank = { give: null, get: null }; break;
     case 'offer': send(U.tradeTo !== null ? { t: 'offer', give: U.trade.give, want: U.trade.want, to: U.tradeTo } : { t: 'offer', give: U.trade.give, want: U.trade.want }); U.trade = { give: {}, want: {} }; break;
     case 'respond': send({ t: 'respond', yes: d.y === '1', id: G.offer && G.offer.id }); if (G.offer) U.seenOffer = G.offer.id; break;
     case 'later': U.seenOffer = G.offer.id; render(); break;

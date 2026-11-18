@@ -1,5 +1,5 @@
 // Jugadores automáticos: deciden una acción cada vez que les toca.
-import { RES, COST, actor, total, targets, afford, canPlayDev, rate, vp, shipMoves, canBuildShipE, pirateTargets, vertLand, edgeSea, shipAt } from './engine.js';
+import { RES, COST, GOODS, RECIPE, handCount, hasCity, canMetroV, demolishTargets, upgradableShips, actor, total, targets, afford, canPlayDev, rate, vp, shipMoves, canBuildShipE, pirateTargets, vertLand, edgeSea, shipAt } from './engine.js';
 
 const pips = (n) => (n ? 6 - Math.abs(7 - n) : 0);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -60,7 +60,7 @@ export function botAction(G, p) {
   if (G.winner !== null) return null;
   const P = G.players[p];
   if (G.phase === 'discard' && G.discardQueue.includes(p)) {
-    let n = Math.floor(total(G, p) / 2); const sel = {};
+    let n = Math.min(total(G, p), Math.floor(handCount(G, p) / 2)); const sel = {};
     while (n > 0) { const r = RES.reduce((a, b) => (P.res[a] - (sel[a] || 0) >= P.res[b] - (sel[b] || 0) ? a : b)); sel[r] = (sel[r] || 0) + 1; n--; }
     return { t: 'discard', sel };
   }
@@ -128,10 +128,23 @@ export function botAction(G, p) {
     }
     if (city.length && afford(G, p, COST.city)) return { t: 'city', v: bestBy(city, (v) => vertexScore(G, v)) };
     if (sett.length && afford(G, p, COST.settlement)) return { t: 'settle', v: bestBy(sett, (v) => vertexScore(G, v, p)) };
+    if (G.opts.ext) { // reglas ampliadas: metrópolis, mejorar barcos y fabricar lo que le falta (o para salvar cartas del 7)
+      const mv = G.board.verts.filter((V) => canMetroV(G, p, V.id)).map((V) => V.id);
+      if (mv.length && (P.metros ?? 3) > 0 && afford(G, p, COST.metro)) return { t: 'metro', v: bestBy(mv, (v) => vertexScore(G, v)) };
+      if (G.opts.ships && G.phase === 'main' && afford(G, p, COST.shipUpX)) { const up = upgradableShips(G, p)[0]; if (up) return { t: 'upgradeShip', id: up.id }; }
+      if (hasCity(G, p)) {
+        const goal = { tools: 2, cloth: 1, cement: 1 }; if (G.opts.ships && upgradableShips(G, p).length) goal.cloth = 2;
+        const big = handCount(G, p) >= 7, k = GOODS.find((k) => (P.res[k] || 0) < goal[k] && afford(G, p, RECIPE[k]));
+        if (k && (big || !sett.length || P.setts <= 0)) return { t: 'craft', k };
+      }
+      if (G.longest === p && P.res.cement > 0 && Math.random() < 0.5) { const e = G.board.edges.find((E) => E.road === p && !E.paved); if (e) return { t: 'pave', e: e.id }; }
+      const dmi = P.dev.findIndex((d, i) => d.t === 'demolish' && canPlayDev(G, p, i));
+      if (dmi >= 0 && G.phase === 'main') { const ts = demolishTargets(G, p); if (ts.length) return { t: 'playDev', i: dmi, e: bestBy(ts, (e) => (G.board.edges[e].road === G.longest ? 5 : 0) + Math.random()) }; }
+    }
     if (!sett.length && road.length && afford(G, p, COST.road) && P.setts > 0) return { t: 'road', e: bestBy(road, (e) => roadScore(G, e, p)) };
     if (afford(G, p, COST.dev) && G.deck.length && (P.res.ore >= 2 || Math.random() < 0.4) && !(city.length && P.res.ore < 3)) return { t: 'buyDev' };
     if (G.phase === 'main') {
-      const di = P.dev.findIndex((d, i) => canPlayDev(G, p, i) && d.t !== 'knight' && d.t !== 'pirate');
+      const di = P.dev.findIndex((d, i) => canPlayDev(G, p, i) && d.t !== 'knight' && d.t !== 'pirate' && d.t !== 'demolish');
       if (di >= 0) { const d = P.dev[di]; if (d.t !== 'road' || road.length) return { t: 'playDev', i: di, list: [need(G, p), need(G, p)], r: need(G, p) }; }
       const ki = P.dev.findIndex((d, i) => d.t === 'knight' && canPlayDev(G, p, i));
       if (ki >= 0 && Math.random() < 0.5) return { t: 'playDev', i: ki };

@@ -17,7 +17,7 @@ let board = new Board3D($('#scene'));
 const NOBOARD = new Proxy({}, { get: (t, k) => (k === 'worldToScreen' ? () => ({ x: 0, y: 0 }) : ['ready', 'followTurn', 'mobile', 'userMoved'].includes(k) ? false : () => {}), set: () => true });
 
 const PHONE = matchMedia('(pointer:coarse)').matches && Math.min(window.screen.width, window.screen.height) < 700;
-let cfg = { self: false, theme: 'classic', players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false };
+let cfg = { self: false, theme: 'classic', players: 4, density: 'normal', fog: false, target: 10, sbp: true, mode: 'classic', islands: 'small', openHands: false, ext: false };
 let screen = 'start'; // start | config | lobby | game
 let room = null, code = null, G = null, staticB = null;
 let lobby = []; // {token,name,color,online}
@@ -104,6 +104,8 @@ function render() {
       <label class="lbl">Islas</label>${seg('islands', [['small', '🏝️ Muchas y pequeñas'], ['big', '🏔️ Pocas y grandes']])}` : ''}
       <label class="lbl">Mapa</label>${seg('fog', [[false, '🗺️ Visible'], [true, '🌫️ A ciegas']])}
       <div class="note">${cfg.fog ? (cfg.mode === 'ships' ? 'Solo se ve la isla principal: el resto del mar está bajo las nubes y hay que explorarlo.' : 'Todo empieza cubierto de niebla: cada poblado o camino despeja los hexágonos que toca.') : 'Se ve todo el mapa desde el principio.'}</div>
+      ${cfg.theme === 'barrio' ? '' : `<label class="lbl">Reglas</label>${seg('ext', [[false, '📜 Las de siempre'], [true, '🏙️ Ampliadas']])}
+      <div class="note">${cfg.ext ? 'Con una ciudad puedes fabricar 🧵 tela (2🐑+1🌾), 🔨 herramientas (2🪵+2🪨) y 🪣 cemento (2🧱+1🪨): cuentan 1 carta para el 7 y no se roban. Sirven para metrópolis (3 puntos, cobra 3), calzadas que no se derriban, mover caminos y mejorar barcos. Nuevas: carta 🧨 Derribo, ⚓ Mayor flota (3 barcos mejorados, +2) y, en islas, 🧭 Mayor descubridor (3 islas, +2).' : 'El Catán de siempre.'}</div>`}
       <label class="lbl">Recursos de los jugadores</label>${seg('openHands', [[false, '🙈 Ocultos'], [true, '👀 A la vista']])}
       <div class="note">${cfg.openHands ? 'Todos ven qué recursos tiene cada uno (en la tele y en los móviles). Las cartas de desarrollo siguen siendo secretas.' : 'Cada uno solo ve sus cartas, como en el juego de mesa.'}</div>
       <label class="lbl">Puntos para ganar</label>
@@ -152,7 +154,7 @@ function renderHUD() {
   $('#ui').innerHTML = `<div id="hud" class="layer ${hudHidden ? 'off' : ''}">
     <div id="turn"><span class="chip" style="background:${T.color}"></span><div><div class="who">${pn(G, G.turn)}</div><div class="what">${esc(phaseText())}</div></div></div>
     ${code ? `<div id="room"><div class="qr">${qrSVG(joinURL(), 3)}</div><div><div class="note" style="margin:0">Sala</div><b>${code}</b></div></div>` : '<div id="room"><b style="font-size:16px;letter-spacing:0">👀 Demostración</b><button class="ghost" style="padding:4px 10px" data-a="exitdemo">Salir</button></div>'}
-    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${RINFO[r].e}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
+    <div id="strip">${G.players.map((P, i) => `<div data-p="${i}" class="pc ${i === G.turn ? 'cur' : ''} ${(lobby[i] && lobby[i].bot) || online.has(lobby[i] && lobby[i].token) ? '' : 'off'}"><span class="chip" style="background:${P.color}"></span><span class="nm">${esc(P.name)}</span><span class="st">${G.opts.openHands ? ['wood', 'brick', 'sheep', 'wheat', 'ore'].map((r) => `${RINFO[r].e}${P.res[r]}`).join(' ') + ' ·' : '🃏' + total(G, i)} 📜${P.dev.length}${G.longest === i ? ' 🛣️' : ''}${G.army === i ? ' ⚔️' : ''}${G.fleet === i ? ' ⚓' : ''}${G.explorer === i ? ' 🧭' : ''}${G.opts.ext ? '' : Object.values(G.islandClaim || {}).filter((x) => x === i).length ? ' 🏝️' + Object.values(G.islandClaim).filter((x) => x === i).length : ''}</span><span class="vp">${vp(G, i, G.winner !== null)}</span></div>`).join('')}</div>
     <div id="audio"><button data-a="music" title="Música (M)">${sound.musicOn ? '🎵' : '🔇'} Música</button><button data-a="sfx" title="Efectos (S)">${sound.sfxOn ? '🔊' : '🔈'} Efectos</button></div>
     ${diceHistHTML()}
     <div id="keys">Ratón: girar · Rueda: zoom · C: cámara ${board.followTurn ? 'sigue el turno' : 'libre'} · H: ocultar · M: música · S: efectos · F: pantalla completa</div>
@@ -347,7 +349,7 @@ setInterval(() => {
 function startGame() {
   const players = lobby.map((p) => ({ name: p.name, color: p.color }));
   applyTheme(cfg.theme);
-  G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands, theme: cfg.theme });
+  G = newGame({ players, density: cfg.density, fog: cfg.fog, target: cfg.target, sbp: cfg.sbp, ships: cfg.mode === 'ships', islands: cfg.islands, openHands: cfg.openHands, theme: cfg.theme, ext: !!cfg.ext && cfg.theme !== 'barrio' });
   staticB = boardStatic(G);
   screen = 'game';
   board.stopVictory(); board.followTurn = !board.mobile;
