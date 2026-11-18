@@ -230,7 +230,7 @@ function optionsFor(sel) {
   if (!G || !sel) return o;
   if (sel.k === 'h' && O.h.includes(sel.id)) o.push({ l: `${W.robberE} Mandar a ${W.robber} aquí`, a: { t: 'robber', h: sel.id } });
   if (sel.k === 'v' && O.v.includes(sel.id)) {
-    if ((O.metroV || []).includes(sel.id)) o.push({ l: '🏙️ Metrópolis (3 pts, cobra 3)', c: COST.metro, a: { t: 'metro', v: sel.id } });
+    if ((O.metroV || []).includes(sel.id)) o.push({ l: '🏙️ Metrópolis', c: COST.metro, a: { t: 'metro', v: sel.id } });
     else if (O.cityV.includes(sel.id)) o.push({ l: bl('city', '🏰', 'Ciudad').join(' '), c: COST.city, a: { t: 'city', v: sel.id } });
     else o.push({ l: bl('settlement', '🏠', 'Poblado').join(' '), c: G.phase === 'setup' ? null : COST.settlement, a: { t: 'settle', v: sel.id } });
   }
@@ -240,7 +240,7 @@ function optionsFor(sel) {
     if (O.ship.includes(sel.id) && canBuildShipE(G, me, sel.id)) o.push({ l: bl('ship', '⛵', 'Barco').join(' '), c: COST.ship, a: { t: 'ship', e: sel.id } });
     if (O.move.includes(sel.id)) o.push({ l: '🧭 Navegar aquí', a: { t: 'moveShip', to: sel.id }, free: true });
     if (O.up.includes(sel.id)) o.push({ l: bl('upship', '⛵', 'Mejorar barco').join(' '), c: G.opts.ext ? COST.shipUpX : COST.shipUp, a: { t: 'upgradeShip', e: sel.id } });
-    if ((O.pave || []).includes(sel.id)) o.push({ l: '🪨 Calzada (no se puede derribar)', c: COST.pave, a: { t: 'pave', e: sel.id } });
+    if ((O.pave || []).includes(sel.id)) o.push({ l: '🪨 Calzada', c: COST.pave, a: { t: 'pave', e: sel.id } });
     if ((O.mvf || []).includes(sel.id)) o.push({ l: '↪️ Mover este camino', a: { t: '_mvfrom', e: sel.id }, free: true });
     if ((O.mvt || []).includes(sel.id)) o.push({ l: '↪️ Ponerlo aquí', c: COST.moveRoad, a: { t: 'moveRoad', from: U.mvFrom, to: sel.id } });
     if ((O.dem || []).includes(sel.id)) o.push({ l: '🧨 Derribar y poner el tuyo', c: COST.road, a: { t: 'playDev', i: U.devI, e: sel.id } });
@@ -434,18 +434,18 @@ function buildPanel() {
   if (G.opts.ships) rows.push(['ship', ...bl('ship', '⛵', 'Barco'), COST.ship, P.shipsLeft > 0 && targets(G, me, 'ship').e.length]);
   if (G.opts.ships) rows.push(['upship', ...bl('upship', '⛵⛵', 'Mejorar barco (2 tramos)'), G.opts.ext ? COST.shipUpX : COST.shipUp, G.phase === 'main' && upgradableShips(G, me).length]);
   if (G.opts.ext) {
-    rows.push(['metro', '🏙️', 'Metrópolis (3 pts, cobra 3)', COST.metro, (P.metros ?? 3) > 0 && G.board.verts.some((V) => canMetroV(G, me, V.id))]);
-    rows.push(['pave', '🪨', 'Calzada (no se derriba)', COST.pave, G.board.edges.some((E) => E.road === me && !E.paved)]);
-    rows.push(['mvfrom', '↪️', 'Mover un camino (con los 15 puestos)', COST.moveRoad, G.phase === 'main' && moveRoadFrom(G, me).length]);
+    rows.push(['metro', '🏙️', 'Metrópolis', COST.metro, (P.metros ?? 3) > 0 && G.board.verts.some((V) => canMetroV(G, me, V.id))]);
+    rows.push(['pave', '🪨', 'Calzada', COST.pave, G.board.edges.some((E) => E.road === me && !E.paved)]);
+    rows.push(['mvfrom', '↪️', 'Mover un camino', COST.moveRoad, G.phase === 'main' && moveRoadFrom(G, me).length]);
   }
   rows.push(['dev', ...bl('dev', '🃏', 'Carta de desarrollo'), COST.dev, G.deckN > 0]);
   const tag = (ok, room) => (!can ? '' : ok && room ? '<span class="tag y">sí</span>' : ok ? '<span class="tag">sin sitio</span>' : '<span class="tag">falta</span>');
   return `<h3>Construir <button class="x" data-a="panel" data-k="">✕</button></h3><div class="scroll">
     ${rows.map(([k, ic, n, c, room]) => { const ok = afford(G, me, c); return `<button class="br ${can && ok && room ? 'ok' : 'no'}" data-a="brow" data-k="${k}" ${can && ok && room ? '' : 'disabled'}><span class="ic">${ic}</span><span class="nm">${n}</span><span class="cost">${costHave(c, P.res)}</span>${tag(ok, room)}</button>`; }).join('')}
-    ${G.opts.ext ? `<div class="lb" style="margin-top:8px">Fabricar ${hasCity(G, me) ? '' : '<small>(necesitas una ciudad)</small>'}</div>${GOODS.map((k) => { const ok = can && hasCity(G, me) && afford(G, me, RECIPE[k]); return `<button class="br ${ok ? 'ok' : 'no'}" data-a="craft" data-k="${k}" ${ok ? '' : 'disabled'}><span class="ic">${RINFO[k].e}</span><span class="nm">${RINFO[k].n} <small>tienes ${P.res[k] || 0}</small></span><span class="cost">${costHave(RECIPE[k], P.res)}</span></button>`; }).join('')}<div class="note">Lo fabricado cuenta 1 carta para el 7, no te lo pueden robar y no se descarta.</div>` : ''}
+    ${G.opts.ext ? `<div class="lb" style="margin-top:8px">Fabricar</div>${GOODS.map((k) => { const ok = can && hasCity(G, me) && afford(G, me, RECIPE[k]); return `<button class="br ${ok ? 'ok' : 'no'}" data-a="craft" data-k="${k}" ${ok ? '' : 'disabled'}><span class="ic">${RINFO[k].e}</span><span class="nm">${RINFO[k].n}</span><span class="cost">${costHave(RECIPE[k], P.res)}</span></button>`; }).join('')}` : ''}
     ${G.opts.ships && can && G.phase === 'main' && targets(G, me, 'move').e.length ? '<div class="note">⛵ Tus barcos navegan gratis: 1 tramo por turno, 2 si están mejorados. Toca uno azul en el mapa. Para mejorar un barco tiene que estar atracado en un poblado o ciudad tuya.</div>' : ''}
     <div class="note">${can ? 'Toca una fila para ver solo esos sitios en el mapa.' : 'Solo puedes construir en tu turno, después de tirar.'}<br>Te quedan ${P.roads} caminos · ${P.setts} poblados · ${P.cities} ciudades${G.opts.ships ? ` · ${P.shipsLeft} barcos` : ''} · ${G.deckN} cartas en el mazo</div>
-    <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ext ? ' · Metrópolis 3 pts · Mayor flota (3 barcos mejorados) 2 pts' + (G.opts.ships ? ' · Tener isla 1 pt · Mayor descubridor (3 islas) 2 pts' : '') : G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
+    <div class="note">Poblado 1 pt · Ciudad 2 pts · Camino más largo (5+) 2 pts · Mayor ejército (3+ ⚔️) 2 pts${G.opts.ext ? '' : G.opts.ships ? ' · Isla nueva +1 pt' : ''}</div></div>`;
 }
 function counter(obj, key, max) {
   return `<div class="cnt">${RES.map((r) => `<div class="c ${obj[r] ? '' : 'z'}" style="background:${RINFO[r].c}"><button class="up" data-a="cnt" data-k="${key}" data-r="${r}" data-d="1" ${max && (obj[r] || 0) >= max[r] ? 'disabled' : ''}><span>${RINFO[r].e}</span>${obj[r] || 0}</button><button class="dn" data-a="cnt" data-k="${key}" data-r="${r}" data-d="-1" ${(obj[r] || 0) <= 0 ? 'disabled' : ''}>−</button></div>`).join('')}</div>`;

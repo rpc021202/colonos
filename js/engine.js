@@ -5,7 +5,7 @@
 export const RES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 export const RINFO = {
   wood: { n: 'Madera', e: '🪵', c: '#2f7d3a' },
-  brick: { n: 'Arcilla', e: '🧱', c: '#c1592b' },
+  brick: { n: 'Arcilla', e: '<img class="ri" src="icons/res/clay.svg" alt="🧱">', c: '#c1592b' },
   sheep: { n: 'Lana', e: '🐑', c: '#7fb446' },
   wheat: { n: 'Trigo', e: '🌾', c: '#d9a21b' },
   ore: { n: 'Piedra', e: '🪨', c: '#6f7c8a' },
@@ -13,7 +13,7 @@ export const RINFO = {
   // reglas ampliadas: materiales fabricados (solo con una ciudad; cuentan 1 carta para el 7 y no se pueden robar ni descartar)
   cloth: { n: 'Tela', e: '🧵', c: '#8e6bb8' },
   tools: { n: 'Herramientas', e: '🔨', c: '#5d6d7e' },
-  cement: { n: 'Cemento', e: '🪣', c: '#9e9a92' },
+  cement: { n: 'Cemento', e: '<img class="ri" src="icons/res/cement.svg" alt="Cemento">', c: '#9e9a92' },
 };
 export const GOODS = ['cloth', 'tools', 'cement'];
 export const RECIPE = { cloth: { sheep: 2, wheat: 1 }, tools: { wood: 2, ore: 2 }, cement: { brick: 2, ore: 1 } };

@@ -73,6 +73,12 @@ function preview() {
 
 /* ---------- render de pantallas ---------- */
 function render() {
+  // al volver a pintar la pantalla, se mantiene la posición del scroll (antes saltaba arriba del todo con cada toque)
+  const sc = [...document.querySelectorAll('#ui .card, #ui #config, #ui #lobby')].map((el) => [el.id || el.parentElement.id, el.className, el.scrollTop]);
+  renderInner();
+  sc.forEach(([id, cls, top]) => { const el = [...document.querySelectorAll('#ui .card, #ui #config, #ui #lobby')].find((e) => (e.id || e.parentElement.id) === id && e.className === cls); if (el && top) el.scrollTop = top; });
+}
+function renderInner() {
   const ui = $('#ui');
   if (screen === 'start') {
     const s = loadSave();
@@ -93,8 +99,8 @@ function render() {
     const seg = (key, vals) => `<div class="seg">${vals.map(([v, l, dis]) => `<button class="${cfg[key] === v ? 'sel' : ''}" data-a="cfg" data-k="${key}" data-v="${v}" ${dis ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
     ui.innerHTML = `<div id="config"><div class="card">
       <h1>Nueva partida</h1><div class="sub">${cfg.self ? 'Juegas desde este dispositivo, que además lleva la partida. Después podrás pasar el código a los demás.' : 'Configura la partida. Después aparecerá el QR para unirse.'}</div>
-      <label class="lbl">Estética</label>${seg('theme', Object.entries(THEMES).map(([k, T]) => [k, T.icon + ' ' + T.name]))}
-      <div class="note">${THEMES[cfg.theme].note} Las reglas son las mismas.</div>
+      <label class="lbl">Versión</label><div class="seg">${VERSIONS.map(([k, l]) => `<button class="${verOf() === k ? 'sel' : ''}" data-a="ver" data-v="${k}">${l}</button>`).join('')}</div>
+      <div class="note">${{ classic: 'El Catán de siempre.', v2: 'El Catán con materiales fabricados, metrópolis y más formas de ganar.', barrio: THEMES.barrio.note }[verOf()]}</div>
       <label class="lbl">¿Cuántos vais a jugar?</label>${seg('players', [2, 3, 4, 5, 6, 7, 8].map((n) => [n, n]))}
       <label class="lbl">Tamaño del mapa</label>
       <div class="sizes">${DENSITIES.map((d) => `<button class="${cfg.density === d.k ? 'sel' : ''}" data-a="cfg" data-k="density" data-v="${d.k}"><span class="n">${landPlan(cfg.players, d.k, cfg.mode === 'ships').N}</span><b>${d.n}</b><span>${cfg.mode === 'ships' ? `isla de ${landPlan(cfg.players, d.k, true).mainN} + ${landPlan(cfg.players, d.k, true).isl} en islas` : `${d.note} · ${d.d} por jugador`}</span></button>`).join('')}</div>
@@ -104,15 +110,15 @@ function render() {
       <label class="lbl">Islas</label>${seg('islands', [['small', '🏝️ Muchas y pequeñas'], ['big', '🏔️ Pocas y grandes']])}` : ''}
       <label class="lbl">Mapa</label>${seg('fog', [[false, '🗺️ Visible'], [true, '🌫️ A ciegas']])}
       <div class="note">${cfg.fog ? (cfg.mode === 'ships' ? 'Solo se ve la isla principal: el resto del mar está bajo las nubes y hay que explorarlo.' : 'Todo empieza cubierto de niebla: cada poblado o camino despeja los hexágonos que toca.') : 'Se ve todo el mapa desde el principio.'}</div>
-      ${cfg.theme === 'barrio' ? '' : `<label class="lbl">Reglas</label>${seg('ext', [[false, '📜 Las de siempre'], [true, '🏙️ Ampliadas']])}
-      <div class="note">${cfg.ext ? 'Con una ciudad puedes fabricar 🧵 tela (2🐑+1🌾), 🔨 herramientas (2🪵+2🪨) y 🪣 cemento (2🧱+1🪨): cuentan 1 carta para el 7 y no se roban. Sirven para metrópolis (3 puntos, cobra 3), calzadas que no se derriban, mover caminos y mejorar barcos. Nuevas: carta 🧨 Derribo, ⚓ Mayor flota (3 barcos mejorados, +2) y, en islas, 🧭 Mayor descubridor (3 islas, +2).' : 'El Catán de siempre.'}</div>`}
       <label class="lbl">Recursos de los jugadores</label>${seg('openHands', [[false, '🙈 Ocultos'], [true, '👀 A la vista']])}
       <div class="note">${cfg.openHands ? 'Todos ven qué recursos tiene cada uno (en la tele y en los móviles). Las cartas de desarrollo siguen siendo secretas.' : 'Cada uno solo ve sus cartas, como en el juego de mesa.'}</div>
       <label class="lbl">Puntos para ganar</label>
       <div class="seg tgt"><button data-a="tgt" data-d="-1">−</button><button class="sel" style="flex:1.4;font-size:20px">${cfg.target}</button><button data-a="tgt" data-d="1">+</button>${[10, 13, 15, 20].map((v) => `<button class="${cfg.target === v ? 'sel' : ''}" data-a="cfg" data-k="target" data-v="${v}">${v}</button>`).join('')}</div>
       ${cfg.target > 22 ? '<div class="note">⚠️ Con las piezas que hay ahora, más de unos 22 puntos es casi imposible (5 poblados, 4 ciudades, carreteras, ejército y cartas de punto).</div>' : ''}
       ${cfg.players > 4 ? `<label class="lbl">Con más de 4</label>${seg('sbp', [[true, '🔨 Construcción extra'], [false, 'Sin ella']])}<div class="note">Al acabar cada turno, el resto puede construir (sin comerciar) para no esperar tanto.</div>` : ''}
-      <button class="primary big" data-a="create" style="margin-top:20px">Crear sala</button>
+      ${verOf() === 'v2' ? '<button class="ghost" data-a="v2info" style="margin-top:16px;width:100%">ℹ️ Qué cambia en Catán V2</button>' : ''}
+      <button class="primary big" data-a="create" style="margin-top:${verOf() === 'v2' ? 8 : 20}px">Crear sala</button>
+      ${v2Info ? V2_INFO : ''}
       <button class="ghost" data-a="back" style="width:100%;margin-top:8px">Volver</button>
       ${err ? `<div class="err">${esc(err)}</div>` : ''}
     </div></div>`;
@@ -196,6 +202,20 @@ function diceHistHTML() {
     <div class="bars">${Object.entries(cnt).map(([n, c]) => `<div class="b"><i style="height:${(c / max) * 100}%" class="${+n === 7 ? 'seven' : +n === 6 || +n === 8 ? 'hot' : ''}"></i><small>${n}</small></div>`).join('')}</div>
     <div class="note" style="margin:2px 0 0;font-size:11px">${rolls.length} tiradas</div></div>`;
 }
+
+/* ---------- versiones del juego ---------- */
+const VERSIONS = [['classic', '🏝️ Catán clásico'], ['v2', '🏙️ Catán V2'], ['barrio', '🏀 El Barrio']];
+const verOf = () => (cfg.theme === 'barrio' ? 'barrio' : cfg.ext ? 'v2' : 'classic');
+let v2Info = false;
+const V2_INFO = `<div id="v2info" data-a="v2close"><div class="card" onclick="event.stopPropagation()"><h2>🏙️ Qué cambia en Catán V2</h2>
+  <p><b>Fabricar</b> (cuando ya tienes una ciudad): 🧵 tela = 2 lana + 1 trigo · 🔨 herramientas = 2 madera + 2 piedra · cemento = 2 arcilla + 1 piedra. Lo fabricado cuenta como 1 carta para el 7, no te lo pueden robar ni hacer descartar, y en el banco se cambia 1 por 1.</p>
+  <p><b>Metrópolis</b>: una ciudad sube a nivel 3 (2 herramientas + 1 tela + 1 cemento + 1 trigo). Vale 3 puntos y cobra 3. Máximo 3 por jugador.</p>
+  <p><b>Calzada</b>: con 1 cemento empiedras un camino tuyo y ya no te lo pueden derribar.</p>
+  <p><b>Mover un camino</b>: cuando ya has puesto los 15, con 1 herramienta cambias uno de sitio sin dejar caminos sueltos.</p>
+  <p><b>Carta 🧨 Derribo</b>: quitas un camino de otro (sin dejarle caminos sueltos y que no sea calzada) y pones uno tuyo pagándolo.</p>
+  <p><b>Barcos</b>: mejorar un barco cuesta 2 madera + 1 tela. <b>⚓ Mayor flota</b>: 3 barcos mejorados dan 2 puntos.</p>
+  <p><b>Islas</b>: tener alguna isla da 1 punto y <b>🧭 Mayor descubridor</b> (3 islas o más) da 2. Se lo quita quien tenga más.</p>
+  <button class="primary" data-a="v2close" style="width:100%">Entendido</button></div></div>`;
 
 /* ---------- red ---------- */
 async function openRoom(c) {
@@ -436,6 +456,9 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-a]'); if (!t) return;
   const d = t.dataset;
   switch (d.a) {
+    case 'ver': cfg.theme = d.v === 'barrio' ? 'barrio' : 'classic'; cfg.ext = d.v === 'v2'; previewKey = ''; render(); break;
+    case 'v2info': v2Info = true; render(); break;
+    case 'v2close': v2Info = false; render(); break;
     case 'tgt': cfg.target = Math.max(3, Math.min(50, cfg.target + +d.d)); render(); break;
     case 'new': err = ''; cfg.self = false; screen = 'config'; render(); break;
     case 'newself': err = ''; cfg.self = true; screen = 'config'; render(); break;
