@@ -4,7 +4,8 @@
 const QS = new URLSearchParams(location.search);
 const LOCAL = QS.has('local');
 const PREFIX = 'colonos-v1-';
-const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+// orden por lo que mejor ha ido en la prueba de diagnóstico (EMQX dejaba colgada la conexión a veces)
+const BROKERS = ['wss://test.mosquitto.org:8081/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
 const PEER_OPTS = { debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }] } };
 const uid = () => Math.random().toString(36).slice(2, 10);
 

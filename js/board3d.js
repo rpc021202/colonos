@@ -709,6 +709,15 @@ export class Board3D {
   }
   tween(dur, fn, done) { this.anims.push({ t: 0, dur, fn, done }); }
   tick() {
+    // móvil: como mucho 30 imágenes por segundo, sombras recalculadas 3 veces por segundo y, si aun así va justo, calidad más baja
+    if (this.mobile) {
+      const now = performance.now(), gap = now - (this._last || now);
+      if (this._last && gap < 31) return;
+      this._last = now; this._fr = (this._fr || 0) + 1;
+      this._avg = this._avg ? this._avg * 0.95 + gap * 0.05 : 33;
+      this.renderer.shadowMap.autoUpdate = false; if (this._fr % 10 === 0) this.renderer.shadowMap.needsUpdate = true;
+      if (!this._lite && this._fr > 90 && this._avg > 55) { this._lite = true; this.renderer.setPixelRatio(1); this.sun.castShadow = false; this.resize(); }
+    }
     const dt = Math.min(0.05, this.clock.getDelta()), time = this.clock.elapsedTime;
     // (las animaciones que se crean al terminar otra se guardan aparte para no perderlas)
     const list = this.anims; this.anims = [];

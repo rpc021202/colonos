@@ -22,7 +22,7 @@ small{color:#6b5f52}
 <div class="sub" style="margin-top:12px"><small id="net"></small></div>
 <script src="vendor/mqtt.min.js"></script>
 <script>
-const BROKERS = [['EMQX (el principal)', 'wss://broker.emqx.io:8084/mqtt'], ['HiveMQ', 'wss://broker.hivemq.com:8884/mqtt'], ['Mosquitto', 'wss://test.mosquitto.org:8081/mqtt']];
+const BROKERS = [['Mosquitto (el principal)', 'wss://test.mosquitto.org:8081/mqtt'], ['HiveMQ', 'wss://broker.hivemq.com:8884/mqtt'], ['EMQX', 'wss://broker.emqx.io:8084/mqtt']];
 const $ = (s) => document.querySelector(s), R = [];
 const cls = (r) => (r.fail ? 'bad' : r.connMs === null ? '' : r.cuts > 0 || r.lost > 0 || (r.avg && r.avg > 900) ? 'slow' : 'ok');
 const label = (r) => (r.fail ? 'No conecta' : r.connMs === null ? 'Probando…' : cls(r) === 'ok' ? 'Bien' : 'Regular');
@@ -35,7 +35,7 @@ function draw() {
   const best = R.filter((r) => !r.fail && r.rtt.length).sort((a, b) => (a.cuts + a.lost) - (b.cuts + b.lost) || a.avg - b.avg)[0];
   const main = R[0];
   $('#verdict').innerHTML = !done ? 'Probando… (tarda en torno a un minuto)'
-    : main.fail || main.cuts || main.lost > 2 ? `⚠️ El servidor principal (EMQX) está fallando desde esta conexión.${best && best !== main ? ` El que mejor va ahora es <b>${best.name}</b>.` : ''}`
+    : main.fail || main.cuts || main.lost > 2 ? `⚠️ El servidor principal (Mosquitto) está fallando desde esta conexión.${best && best !== main ? ` El que mejor va ahora es <b>${best.name}</b>.` : ''}`
     : `✅ El servidor principal responde bien desde aquí (${main.avg} ms de media).`;
   $('#net').textContent = `Red: ${navigator.connection && navigator.connection.effectiveType ? navigator.connection.effectiveType + ' · ' : ''}${navigator.onLine ? 'con internet' : 'sin internet'} · ${new Date().toLocaleString('es-ES')}`;
 }
