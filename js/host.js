@@ -106,7 +106,9 @@ function render() {
       <div class="note">${cfg.fog ? (cfg.mode === 'ships' ? 'Solo se ve la isla principal: el resto del mar está bajo las nubes y hay que explorarlo.' : 'Todo empieza cubierto de niebla: cada poblado o camino despeja los hexágonos que toca.') : 'Se ve todo el mapa desde el principio.'}</div>
       <label class="lbl">Recursos de los jugadores</label>${seg('openHands', [[false, '🙈 Ocultos'], [true, '👀 A la vista']])}
       <div class="note">${cfg.openHands ? 'Todos ven qué recursos tiene cada uno (en la tele y en los móviles). Las cartas de desarrollo siguen siendo secretas.' : 'Cada uno solo ve sus cartas, como en el juego de mesa.'}</div>
-      <label class="lbl">Puntos para ganar</label>${seg('target', [[8, '8'], [10, '10'], [12, '12'], [13, '13'], [14, '14']])}
+      <label class="lbl">Puntos para ganar</label>
+      <div class="seg tgt"><button data-a="tgt" data-d="-1">−</button><button class="sel" style="flex:1.4;font-size:20px">${cfg.target}</button><button data-a="tgt" data-d="1">+</button>${[10, 13, 15, 20].map((v) => `<button class="${cfg.target === v ? 'sel' : ''}" data-a="cfg" data-k="target" data-v="${v}">${v}</button>`).join('')}</div>
+      ${cfg.target > 22 ? '<div class="note">⚠️ Con las piezas que hay ahora, más de unos 22 puntos es casi imposible (5 poblados, 4 ciudades, carreteras, ejército y cartas de punto).</div>' : ''}
       ${cfg.players > 4 ? `<label class="lbl">Con más de 4</label>${seg('sbp', [[true, '🔨 Construcción extra'], [false, 'Sin ella']])}<div class="note">Al acabar cada turno, el resto puede construir (sin comerciar) para no esperar tanto.</div>` : ''}
       <button class="primary big" data-a="create" style="margin-top:20px">Crear sala</button>
       <button class="ghost" data-a="back" style="width:100%;margin-top:8px">Volver</button>
@@ -432,6 +434,7 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-a]'); if (!t) return;
   const d = t.dataset;
   switch (d.a) {
+    case 'tgt': cfg.target = Math.max(3, Math.min(50, cfg.target + +d.d)); render(); break;
     case 'new': err = ''; cfg.self = false; screen = 'config'; render(); break;
     case 'newself': err = ''; cfg.self = true; screen = 'config'; render(); break;
     case 'resume': err = ''; resume(); break;
