@@ -367,7 +367,8 @@ export function canRoadE(G, p, e, fromV) {
   if (fromV !== undefined && fromV !== null) return E.v.includes(fromV);
   return E.v.some((v) => {
     const V = G.board.verts[v];
-    if (V.b) return V.b.p === p;
+    if (V.b && V.b.p === p) return true;
+    if (V.b && !G.opts.ext) return false; // clásico: un poblado ajeno corta el paso; en V2 se puede seguir el camino por detrás
     return V.edges.some((x) => x !== e && G.board.edges[x].road === p);
   });
 }
@@ -531,7 +532,7 @@ export function roadsOK(G, q) {
       if (E[e].road !== q || seen.has(e)) continue;
       seen.add(e);
       const o = E[e].v[0] === v ? E[e].v[1] : E[e].v[0], b = V[o].b;
-      if (!visited.has(o) && !(b && b.p !== q)) { visited.add(o); stack.push(o); }
+      if (!visited.has(o) && !(b && b.p !== q && !G.opts.ext)) { visited.add(o); stack.push(o); }
     }
   }
   return E.every((e) => e.road !== q || seen.has(e.id));

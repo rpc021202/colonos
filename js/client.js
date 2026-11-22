@@ -394,6 +394,11 @@ function gameHTML() {
     <button class="ib ${U.panel === 'build' ? 'on' : ''}" data-a="panel" data-k="build">🔨${canAny ? '<span class="dot"></span>' : ''}<small>Construir</small></button>
     <button class="ib ${U.panel === 'trade' ? 'on' : ''}" data-a="panel" data-k="trade">⇄${incoming || (O && O.from === me && Object.keys(O.acc).length) ? '<span class="dot o"></span>' : ''}<small>Comerciar</small></button>
     <button class="ib ${U.panel === 'menu' ? 'on' : ''}" data-a="panel" data-k="menu">☰<small>Partida</small></button></div>`;
+  if (incoming && U.panel !== 'trade') {
+    const can = RES.every((r) => P.res[r] >= O.want[r]), sure = U.sureOffer === O.id && Date.now() - U.sureAt < 4000;
+    h += `<div id="offerbar"><div class="t">🤝 <b>${esc(G.players[O.from].name)}</b> ${O.to === me ? 'te ofrece' : 'ofrece'} <b>${fmt(O.give)}</b> por <b>${fmt(O.want)}</b></div>
+      <div class="b"><button data-a="respond" data-y="0">Rechazar</button><button class="primary ${sure ? 'sure' : ''}" data-a="offeryes" ${can ? '' : 'disabled'}>${!can ? 'No lo tienes' : sure ? '¿Seguro? Toca otra vez' : 'Aceptar'}</button></div></div>`;
+  }
   h += actionHTML();
   h += handHTML();
   if (U.panel) h += `<div class="panel">${U.panel === 'build' ? buildPanel() : U.panel === 'trade' ? tradePanel() : menuPanel()}</div>`;
@@ -540,11 +545,6 @@ function modalHTML() {
   }
   if (U.modal && U.modal.t === 'pirate') return box(`<h2>🏴‍☠️ Pirata</h2><p>Asalta los barcos de un jugador y róbale 2 recursos.</p><div class="row">${pirateTargets(G, me).map((q) => `<button data-a="pirq" data-q="${q}"><span class="chip" style="background:${G.players[q].color}"></span> ${esc(G.players[q].name)} (${G.players[q].n})</button>`).join('')}</div><button class="ghost wide" data-a="mclose">Cancelar</button>`);
   if (U.modal && U.modal.t === 'mono') return box(`<h2>💰 Monopolio</h2><p>Todos te darán todas las cartas de ese recurso.</p><div class="pick">${RES.map((r) => `<button data-a="mono" data-r="${r}"><span>${RINFO[r].e}</span>${RINFO[r].n}</button>`).join('')}</div><button class="ghost wide" data-a="mclose">Cancelar</button>`);
-  const O = G.offer;
-  if (O && O.from !== me && (O.to == null || O.to === me) && !O.acc[me] && !O.rej[me] && U.seenOffer !== O.id && U.panel !== 'trade') {
-    const can = RES.every((r) => P.res[r] >= O.want[r]);
-    return box(`<h2>🤝 ${esc(G.players[O.from].name)} ${O.to === me ? 'te propone' : 'propone a todos'}</h2><p>Te da <b>${fmt(O.give)}</b> a cambio de <b>${fmt(O.want)}</b>.</p><div class="row"><button data-a="respond" data-y="0">Rechazar</button><button class="primary" data-a="respond" data-y="1" ${can ? '' : 'disabled'}>${can ? 'Aceptar' : 'No lo tienes'}</button></div><button class="ghost wide" data-a="later">Decidir luego</button>`);
-  }
   return '';
 }
 
@@ -619,6 +619,10 @@ document.addEventListener('click', (e) => {
     case 'offer': send(U.tradeTo !== null ? { t: 'offer', give: U.trade.give, want: U.trade.want, to: U.tradeTo } : { t: 'offer', give: U.trade.give, want: U.trade.want }); U.trade = { give: {}, want: {} }; break;
     case 'respond': send({ t: 'respond', yes: d.y === '1', id: G.offer && G.offer.id }); if (G.offer) U.seenOffer = G.offer.id; break;
     case 'later': U.seenOffer = G.offer.id; render(); break;
+    case 'offeryes': // aceptar pide un segundo toque, por si se toca sin querer
+      if (U.sureOffer === (G.offer && G.offer.id) && Date.now() - U.sureAt < 4000) { U.sureOffer = null; send({ t: 'respond', yes: true, id: G.offer && G.offer.id }); }
+      else { U.sureOffer = G.offer && G.offer.id; U.sureAt = Date.now(); render(); setTimeout(render, 4100); }
+      break;
     case 'deal': send({ t: 'confirm', q: +d.q }); break;
     case 'canceloffer': send({ t: 'cancelOffer' }); break;
     case 'winok': U.winSeen = true; render(); break;
