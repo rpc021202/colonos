@@ -60,7 +60,7 @@ export function botAction(G, p) {
   if (G.winner !== null) return null;
   const P = G.players[p];
   if (G.phase === 'discard' && G.discardQueue.includes(p)) {
-    let n = Math.min(total(G, p), Math.floor(handCount(G, p) / 2)); const sel = {};
+    let n = Math.floor(total(G, p) / 2); const sel = {};
     while (n > 0) { const r = RES.reduce((a, b) => (P.res[a] - (sel[a] || 0) >= P.res[b] - (sel[b] || 0) ? a : b)); sel[r] = (sel[r] || 0) + 1; n--; }
     return { t: 'discard', sel };
   }
@@ -134,7 +134,7 @@ export function botAction(G, p) {
       if (G.opts.ships && G.phase === 'main' && afford(G, p, COST.shipUpX)) { const up = upgradableShips(G, p)[0]; if (up) return { t: 'upgradeShip', id: up.id }; }
       if (hasCity(G, p)) {
         const goal = { tools: 2, cloth: 1, cement: 1 }; if (G.opts.ships && upgradableShips(G, p).length) goal.cloth = 2;
-        const big = handCount(G, p) >= 7, k = GOODS.find((k) => (P.res[k] || 0) < goal[k] && afford(G, p, RECIPE[k]));
+        const big = total(G, p) >= 7, k = GOODS.find((k) => (P.res[k] || 0) < goal[k] && afford(G, p, RECIPE[k]));
         if (k && (big || !sett.length || P.setts <= 0)) return { t: 'craft', k };
       }
       if (G.longest === p && P.res.cement > 0 && Math.random() < 0.5) { const e = G.board.edges.find((E) => E.road === p && !E.paved); if (e) return { t: 'pave', e: e.id }; }

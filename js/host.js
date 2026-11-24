@@ -208,7 +208,7 @@ const VERSIONS = [['classic', '🏝️ Catán clásico'], ['v2', '🏙️ Catán
 const verOf = () => (cfg.theme === 'barrio' ? 'barrio' : cfg.ext ? 'v2' : 'classic');
 let v2Info = false;
 const V2_INFO = `<div id="v2info" data-a="v2close"><div class="card" onclick="event.stopPropagation()"><h2>🏙️ Qué cambia en Catán V2</h2>
-  <p><b>Fabricar</b> (cuando ya tienes una ciudad): 🧵 tela = 2 lana + 1 trigo · 🔨 herramientas = 2 madera + 2 piedra · cemento = 2 arcilla + 1 piedra. Lo fabricado cuenta como 1 carta para el 7, no te lo pueden robar ni hacer descartar, y en el banco se cambia 1 por 1.</p>
+  <p><b>Fabricar</b> (cuando ya tienes una ciudad): 🧵 tela = 2 lana + 1 trigo · 🔨 herramientas = 2 madera + 2 piedra · cemento = 2 arcilla + 1 piedra. Lo fabricado no cuenta para el 7, no te lo pueden robar ni hacer descartar, y en el banco se cambia 1 por 1.</p>
   <p><b>Metrópolis</b>: una ciudad sube a nivel 3 (2 herramientas + 1 tela + 1 cemento + 1 trigo). Vale 3 puntos y cobra 3. Máximo 3 por jugador.</p>
   <p><b>Calzada</b>: con 1 cemento empiedras un camino tuyo y ya no te lo pueden derribar.</p>
   <p><b>Mover un camino</b>: cuando ya has puesto los 15, con 1 herramienta cambias uno de sitio sin dejar caminos sueltos.</p>

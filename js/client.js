@@ -509,7 +509,7 @@ function modalHTML() {
   }
   if (G.phase === 'discard' && G.discardQueue.includes(me)) {
     U.disc = U.disc || {};
-    const tot = sumRes(P.res), need = Math.floor(tot / 2), sum = sumRes(U.disc);
+    const tot = RES.reduce((s, r) => s + (P.res[r] || 0), 0), need = Math.floor(tot / 2), sum = sumRes(U.disc); // lo fabricado no cuenta
     return box(`<h2>${ui('discardTitle') || '🦹 Ha salido un 7'}</h2><p>${ui('discardText') ? ui('discardText') + ' ' : ''}Tienes ${tot} cartas: toca ${need} para devolverlas.</p>
       <div class="fanm">${RES.map((r) => { const left = P.res[r] - (U.disc[r] || 0); return cardHTML(r, { tag: 'button', n: left, sub: 'te quedan', at: `data-a="cnt" data-k="disc" data-r="${r}" data-d="1" ${left > 0 && sum < need ? '' : 'disabled'}`, extra: U.disc[r] ? `<span class="out">−${U.disc[r]}</span>` : '' }); }).join('')}</div>
       <div class="row"><button class="ghost" data-a="discreset" ${sum ? '' : 'disabled'}>Deshacer</button><button class="primary" data-a="discard" ${sum === need ? '' : 'disabled'}>Devolver ${sum}/${need}</button></div>`);

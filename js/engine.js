@@ -10,7 +10,7 @@ export const RINFO = {
   wheat: { n: 'Trigo', e: '🌾', c: '#d9a21b' },
   ore: { n: 'Piedra', e: '🪨', c: '#6f7c8a' },
   desert: { n: 'Desierto', e: '🏜️', c: '#d8c48f' },
-  // reglas ampliadas: materiales fabricados (solo con una ciudad; cuentan 1 carta para el 7 y no se pueden robar ni descartar)
+  // reglas ampliadas: materiales fabricados (solo con una ciudad; no cuentan para el 7 y no se pueden robar ni descartar)
   cloth: { n: 'Tela', e: '🧵', c: '#8e6bb8' },
   tools: { n: 'Herramientas', e: '🔨', c: '#5d6d7e' },
   cement: { n: 'Cemento', e: '<img class="ri" src="icons/res/cement.svg" alt="Cemento">', c: '#9e9a92' },
@@ -579,7 +579,7 @@ function produce(G, n) {
 function startSeven(G) {
   const n = G.players.length;
   G.discardQueue = [];
-  for (let i = 0; i < n; i++) { const p = (G.turn + i) % n; if (handCount(G, p) > 7 && total(G, p) > 0) G.discardQueue.push(p); }
+  for (let i = 0; i < n; i++) { const p = (G.turn + i) % n; if (total(G, p) > 7) G.discardQueue.push(p); /* lo fabricado (V2) no cuenta para el 7 */ }
   G.afterRobber = 'main';
   G.phase = G.discardQueue.length ? 'discard' : 'robber';
   if (G.phase === 'robber') skipRobberIfNoTarget(G);
@@ -788,7 +788,7 @@ export function act(G, p, a) {
     }
     case 'discard': {
       if (G.phase !== 'discard' || !G.discardQueue.includes(p)) return 'No tienes que descartar';
-      const need = Math.min(total(G, p), Math.floor(handCount(G, p) / 2)), sel = a.sel || {};
+      const need = Math.floor(total(G, p) / 2), sel = a.sel || {};
       let sum = 0;
       for (const r of RES) { const n = sel[r] | 0; if (n < 0 || n > me.res[r]) return 'Selección no válida'; sum += n; }
       if (sum !== need) return `Tienes que descartar ${need}`;
